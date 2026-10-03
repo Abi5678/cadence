@@ -1,3 +1,6 @@
+> **Note:** this file is the original UI handoff from before the backend existed, and its "simulated" notes
+> describe that prototype. For the live system on the GB10, start with [README.md](README.md).
+
 # Cadence — official UI handoff
 
 Approved UI, October 3, 2026. Source: `3721b5e5166580906f75997ffd2f93ab8f778006`.
