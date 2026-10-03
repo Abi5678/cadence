@@ -1,0 +1,15 @@
+# OS / editor
+.DS_Store
+._*
+.Spotlight-V100/
+.Trashes/
+Thumbs.db
+
+# Local tooling
+.claude/
+node_modules/
+__pycache__/
+
+# Never commit secrets
+.env
+.env.*
