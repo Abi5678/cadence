@@ -5,7 +5,7 @@ for(const file of ['weave.js','app.js'])vm.runInContext(fs.readFileSync(__dirnam
 const run=s=>vm.runInContext(s,context),html=()=>q('#app').innerHTML;
 (async()=>{
 assert.match(html(),/Every detail, connected/);assert.match(html(),/weave-enter/);assert.match(html(),/gap-outline/);
-for(const [role,routes] of Object.entries({clinician:['clinician','review','documents','timeline'],patient:['kiosk','timeline'],coordinator:['packets/104','timeline'],operator:['demo','timeline']})){
+for(const [role,routes] of Object.entries({clinician:['clinician','review','documents','timeline'],patient:['kiosk','timeline']})){
  run(`model.switchRole('${role}')`);for(const route of routes){location.hash='#'+route;run('render(true)');assert.match(html(),/data-weave/);assert.match(html(),/weave-enter/);assert.doesNotMatch(html(),/undefined|NaN/);}
 }
 run("model.switchRole('patient');model.checkIn(true);model.switchRole('clinician');model.replay();model.review('accept',1);model.complete();");

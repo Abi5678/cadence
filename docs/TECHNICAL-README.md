@@ -1,3 +1,5 @@
+> Current approved UI: see [OFFICIAL-UI.md](OFFICIAL-UI.md). Older role/layout descriptions below are historical.
+
 # Cadence — coordinator workspace
 
 The primary UI now serves the staff coordinator. It preserves the approved Weave visuals, Iris & Champagne palette, typography and wordmark.

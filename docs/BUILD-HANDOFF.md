@@ -1,3 +1,5 @@
+> Current approved UI: see [OFFICIAL-UI.md](OFFICIAL-UI.md). Older role/layout descriptions below are historical.
+
 # Build handoff — coordinator-first Cadence
 
 ## Latest product direction
