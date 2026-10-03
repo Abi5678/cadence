@@ -30,7 +30,9 @@ def run_sweep(conn, runner) -> dict:
                 t = clinic.create_task(conn, kind, title, brief.format(", ".join(items)), dedupe_key=key)
                 if t["status"] == "running":
                     new.append(t["id"])
-    for tid in new:
+        # Retry tasks still waiting on the agent (e.g. model was not up yet). Dedup by inflight set.
+        retry = [r["id"] for r in conn.execute("SELECT id FROM tasks WHERE status='running' ORDER BY created_at").fetchall()]
+    for tid in dict.fromkeys(new + retry):
         runner.wake(tid)
     out["agent_tasks"] = new
     return out

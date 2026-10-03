@@ -131,6 +131,10 @@ class AgentRunner:
                 row = self.conn.execute("SELECT status FROM tasks WHERE id=?", (task_id,)).fetchone()
                 if row and row["status"] == "running":
                     self.conn.execute("UPDATE tasks SET status='completed' WHERE id=?", (task_id,))
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            # Model not up yet: leave the task running; the next sweep re-wakes it.
+            with mcp_tools.LOCK:
+                emit(self.conn, task_id, "agent.unavailable", "service", f"{b} backend unreachable ({type(e).__name__}); will retry")
         except Exception as e:  # noqa: BLE001 - keep the always-on loop alive
             log.exception("agent run failed")
             with mcp_tools.LOCK:

@@ -1,0 +1,157 @@
+// Live operations console backed by the Cadence service (/api/state + /api/events SSE).
+(() => {
+  'use strict';
+  const $ = (s, r = document) => r.querySelector(s);
+  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const tm = ts => ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  const dt = ts => ts ? new Date(ts).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  const money = n => n == null ? '—' : `$${Number(n).toFixed(2)}`;
+  const tone = s => ({ confirmed: 'good', completed: 'good', closed: 'good', transmitted: 'good', sent_to_lab: 'good', submitted: 'good', active: 'good', checked_in: 'iris',
+    prepared: 'warn', requested: 'warn', offered: 'warn', pending_approval: 'warn', booked: 'warn', sent: 'warn', review: 'warn', running: 'iris', waiting: 'warn', open: 'iris',
+    rejected: 'bad', failed: 'bad', cancelled: 'bad', escalated: 'bad', inactive: 'bad', declined: 'bad' }[s] || '');
+  const pill = s => `<span class="pill ${tone(s)}">${esc(String(s).replace(/_/g, ' '))}</span>`;
+  let S = null, tab = location.hash.slice(1) || 'approvals', phonePatient = 'P-104';
+
+  async function call(path, body) {
+    const r = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.detail || `HTTP ${r.status}`);
+    return data;
+  }
+  function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(() => el.classList.remove('show'), 2600); }
+  async function act(fn, ok) { try { await fn(); if (ok) toast(ok); await refresh(); } catch (e) { toast(e.message); } }
+
+  const name = id => (S.patients.find(p => p.id === id) || {}).name || id || '—';
+
+  const views = {
+    approvals() {
+      const pending = S.approvals.filter(a => a.state === 'prepared');
+      const done = S.approvals.filter(a => a.state !== 'prepared').slice(0, 25);
+      return `<h1>Approvals</h1><p class="lede">Everything that leaves the clinic waits here: pharmacy, lab, claims, vendor orders, free-text patient messages and shift changes.</p>
+      <div class="grid"><section class="card"><h2>Waiting for you <small>${pending.length}</small></h2>
+      ${pending.map(a => `<div class="approval"><div><div class="what">${esc(a.summary)}</div><div class="meta">${esc(a.action.replace(/_/g, ' '))} · ${tm(a.created_at)}${a.task_id ? ` · task ${esc(a.task_id)}` : ''}</div>
+        ${a.payload.body ? `<pre>${esc(a.payload.body)}</pre>` : ''}</div>
+        <div class="row-actions"><button class="approve" data-approve="${esc(a.id)}">Approve</button><button data-reject="${esc(a.id)}">Reject</button></div></div>`).join('') || '<p class="empty">Nothing waiting. The agent will queue items here.</p>'}
+      </section><section class="card"><h2>Recent decisions</h2><table><tr><th>Action</th><th>State</th><th>Receipt</th></tr>
+      ${done.map(a => `<tr><td>${esc(a.summary)}<br><small class="pill">${esc(a.decided_by || '')}</small></td><td>${pill(a.state)}</td><td><small>${esc(a.receipt || '')}</small></td></tr>`).join('')}</table></section></div>`;
+    },
+    schedule() {
+      const appts = S.appointments.filter(a => a.status !== 'cancelled' || Date.now() - new Date(a.starts_at) < 864e5);
+      return `<h1>Schedule &amp; waitlist</h1><p class="lede">Cadence asks patients to confirm visits in the next 48 hours, and offers any freed slot to the waitlist (30-minute hold, then the next person).</p>
+      <div class="grid"><section class="card" style="grid-column:1/-1"><h2>Appointments</h2><table><tr><th>When</th><th>Patient</th><th>Provider</th><th>Status</th><th>Confirmation / offer</th><th></th></tr>
+      ${appts.map(a => `<tr><td>${dt(a.starts_at)}</td><td>${a.patient_id ? `${esc(a.patient_name)}<br><small>${esc(a.reason || '')}</small>` : '<em>open slot</em>'}</td><td>${esc(a.provider_name)}</td><td>${pill(a.status)}</td>
+        <td>${a.offered_to ? `offered to ${esc(name(a.offered_to))} until ${tm(a.offer_expires_at)}` : a.patient_id ? pill(a.confirmation) : ''}</td>
+        <td class="row-actions">${['booked', 'confirmed'].includes(a.status) ? `<button data-checkin="${esc(a.id)}">Check in</button>` : ''}${a.status === 'checked_in' ? `<button data-complete="${esc(a.id)}">Complete visit</button>` : ''}${a.patient_id ? `<button data-phone="${esc(a.patient_id)}">Phone</button>` : ''}</td></tr>`).join('')}</table></section>
+      <section class="card"><h2>Waitlist</h2><table><tr><th>Patient</th><th>Reason</th><th>Priority</th><th>Status</th></tr>
+      ${S.waitlist.map(w => `<tr><td>${esc(name(w.patient_id))}</td><td>${esc(w.reason)}</td><td>${esc(w.priority)}</td><td>${pill(w.status)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">Empty</td></tr>'}</table></section></div>`;
+    },
+    care() {
+      return `<h1>Aftercare &amp; monitoring</h1><p class="lede">Post-visit check-ins go out automatically. Replies with warning signs, and out-of-range vitals, go straight to the doctor. Cadence routes; it does not diagnose.</p>
+      <div class="grid"><section class="card"><h2>Aftercare check-ins</h2><table><tr><th>Patient</th><th>Due</th><th>Status</th><th>Answer</th></tr>
+      ${S.aftercare.map(c => `<tr><td>${esc(name(c.patient_id))}</td><td>${dt(c.due_at)}</td><td>${pill(c.status)}</td><td>${esc(c.answer || '')}</td></tr>`).join('')}</table></section>
+      <section class="card"><h2>Simulate a monitoring reading</h2><form class="inline" id="vitals-form">
+        <select name="patient_id">${S.patients.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select>
+        <select name="kind"><option value="spo2">SpO₂ (%)</option><option value="heart_rate">Heart rate</option><option value="systolic_bp">Systolic BP</option><option value="temp_c">Temp °C</option><option value="glucose">Glucose</option></select>
+        <input name="value" type="number" step="0.1" required placeholder="Value"><button class="primary">Record</button></form>
+        <p class="footnote">Alert ranges: SpO₂ 92+, HR 50–110, SBP 90–160, temp 35.5–38.0, glucose 70–250 (demo values).</p></section>
+      <section class="card"><h2>Doctor alerts</h2><table><tr><th>Sent</th><th>Alert</th></tr>
+      ${S.messages.filter(m => m.channel.startsWith('slack')).map(m => `<tr><td>${tm(m.created_at)}<br>${pill(m.channel === 'slack' ? 'slack' : 'preview')}</td><td>${esc(m.body)}</td></tr>`).join('') || '<tr><td colspan="2" class="empty">None yet</td></tr>'}</table></section></div>`;
+    },
+    orders() {
+      return `<h1>Orders, labs &amp; prescriptions</h1><p class="lede">Only provider-signed orders can be routed. Cadence queues them for approval, then sends to the (mock) lab or pharmacy and records the receipt.</p>
+      <div class="grid"><section class="card" style="grid-column:1/-1"><h2>Doctor orders</h2><table><tr><th>Order</th><th>Patient</th><th>Detail</th><th>Signed</th><th>Status</th></tr>
+      ${S.orders.map(o => `<tr><td>${esc(o.id)}<br>${pill(o.kind)}</td><td>${esc(name(o.patient_id))}</td><td>${esc(o.detail)}</td><td>${o.signed_by ? esc(o.signed_by) : pill('unsigned')}</td><td>${pill(o.status)}</td></tr>`).join('')}</table></section>
+      <section class="card"><h2>Simulate a signed doctor order</h2><form class="inline" id="order-form">
+        <select name="kind"><option value="lab">Lab order</option><option value="rx">Prescription</option></select>
+        <select name="patient_id">${S.patients.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select>
+        <select name="provider_id"><option value="DR-CHEN">Dr. Chen</option><option value="DR-PATEL">Dr. Patel</option></select>
+        <input name="detail" required placeholder="e.g. Lipid panel, fasting" class="full"><button class="primary">Sign &amp; submit</button></form></section></div>`;
+    },
+    frontdesk() {
+      return `<h1>Front desk &amp; billing</h1><p class="lede">Check-in runs a payer eligibility check and posts the copay. Completing a visit drafts the claim for approval and schedules aftercare.</p>
+      <div class="grid"><section class="card"><h2>Today and tomorrow</h2><table><tr><th>When</th><th>Patient</th><th>Status</th><th></th></tr>
+      ${S.appointments.filter(a => a.patient_id && !['cancelled'].includes(a.status)).map(a => `<tr><td>${dt(a.starts_at)}</td><td>${esc(a.patient_name)}</td><td>${pill(a.status)}</td>
+        <td class="row-actions">${['booked', 'confirmed'].includes(a.status) ? `<button data-checkin="${esc(a.id)}">Check in</button>` : ''}${a.status === 'checked_in' ? `<button data-complete="${esc(a.id)}">Complete</button>` : ''}</td></tr>`).join('')}</table></section>
+      <section class="card"><h2>Charges &amp; claims</h2><table><tr><th>Charge</th><th>Patient</th><th>Amount</th><th>Patient owes</th><th>Status</th></tr>
+      ${S.charges.map(c => `<tr><td>${esc(c.description)}</td><td>${esc(name(c.patient_id))}</td><td>${money(c.amount)}</td><td>${money(c.patient_responsibility)}</td><td>${pill(c.status)}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No charges yet</td></tr>'}</table></section></div>`;
+    },
+    ops() {
+      const st = S.staffing;
+      return `<h1>Inventory &amp; staff</h1><p class="lede">The always-on sweep drafts reorders for anything below par and proposes fills for open shifts within each person's weekly hour limit.</p>
+      <div class="grid"><section class="card"><h2>Inventory</h2><table><tr><th>Item</th><th>On hand</th><th>Par</th><th></th></tr>
+      ${S.inventory.map(i => `<tr><td>${esc(i.name)}<br><small>${esc(i.vendor)}</small></td><td>${esc(i.on_hand)}</td><td>${esc(i.par)}</td><td>${i.below_par ? pill('low') : pill('ok')}</td></tr>`).join('')}</table></section>
+      <section class="card"><h2>Staff hours</h2><table><tr><th>Staff</th><th>Role</th><th>Scheduled</th><th>Max</th></tr>
+      ${st.staff.map(s => `<tr><td>${esc(s.name)}</td><td>${esc(s.role.replace(/_/g, ' '))}</td><td>${esc(s.scheduled_hours)} h</td><td>${esc(s.max_weekly_hours)} h</td></tr>`).join('')}</table></section>
+      <section class="card"><h2>Shifts</h2><table><tr><th>Shift</th><th>When</th><th>Assigned</th></tr>
+      ${st.shifts.map(s => `<tr><td>${esc(s.role.replace(/_/g, ' '))}</td><td>${dt(s.starts_at)}–${tm(s.ends_at)}</td><td>${s.staff_name ? esc(s.staff_name) : pill('open')}</td></tr>`).join('')}</table></section></div>`;
+    },
+    agent() {
+      return `<h1>Agent activity</h1><p class="lede">Every task, tool call and model call from the GB10 agent (backend: <strong>${esc(S.agent_backend)}</strong>). The scheduler sweeps every minute.</p>
+      <form class="composer" id="task-form"><input name="title" required maxlength="200" placeholder="Ask Cadence to do something, e.g. “Find who on the waitlist could take Dr. Chen’s open slot tomorrow”"><button class="primary">Assign</button><button type="button" id="sweep">Run sweep now</button></form>
+      <div class="grid"><section class="card"><h2>Tasks</h2><table><tr><th>Task</th><th>Status</th></tr>
+      ${S.tasks.map(t => `<tr><td>${esc(t.title)}<br><small>${esc(t.id)} · ${tm(t.created_at)}</small></td><td>${pill(t.status)}</td></tr>`).join('')}</table></section>
+      <section class="card"><h2>Live events</h2><ul class="feed">${S.events.map(e => `<li><time>${tm(e.created_at)}</time><div><span class="k">${esc(e.kind)}</span><br>${esc(e.summary)}</div></li>`).join('')}</ul></section></div>`;
+    },
+  };
+
+  function renderPhone() {
+    const sel = $('#phone-patient');
+    if (!sel.options.length) sel.innerHTML = S.patients.map(p => `<option value="${esc(p.id)}">${esc(p.name)} (${esc(p.id)})</option>`).join('');
+    sel.value = phonePatient;
+    const thread = S.messages.filter(m => m.party === phonePatient && m.channel === 'sms').slice().reverse();
+    const el = $('#phone-thread');
+    el.innerHTML = thread.map(m => `<div class="bubble ${m.direction === 'in' ? 'in' : 'out'}">${esc(m.body)}<time>${tm(m.created_at)}</time></div>`).join('') || '<p class="empty">No messages yet.</p>';
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function render() {
+    if (!S) return;
+    document.querySelectorAll('#navigation a').forEach(a => a.classList.toggle('active', a.dataset.tab === tab));
+    $('#n-approvals').textContent = S.approvals.filter(a => a.state === 'prepared').length;
+    const app = $('#app'), focus = document.activeElement?.closest('form') ? document.activeElement.name : null;
+    if (!(focus && app.contains(document.activeElement))) app.innerHTML = (views[tab] || views.approvals)();
+    renderPhone();
+  }
+
+  async function refresh() { S = await call('/api/state'); render(); }
+  async function health() {
+    try {
+      const h = await call('/api/health');
+      $('#health').innerHTML = [['model', h.vllm], ['hermes', h.hermes]].map(([k, v]) => `<span><span class="dot ${v === 'ok' ? 'ok' : ''}"></span>${k}: ${esc(v === 'ok' ? 'online' : 'offline')}</span>`).join('<br>') + `<br><span>agent: ${esc(h.agent_backend)}</span>`;
+    } catch { $('#health').textContent = 'service offline'; }
+  }
+
+  document.addEventListener('click', e => {
+    const b = e.target.closest('button,a[data-tab]'); if (!b) return;
+    const d = b.dataset;
+    if (d.approve) act(() => call(`/api/approvals/${d.approve}/decide`, { approve: true }), 'Approved');
+    else if (d.reject) act(() => call(`/api/approvals/${d.reject}/decide`, { approve: false }), 'Rejected');
+    else if (d.checkin) act(() => call(`/api/visits/${d.checkin}/checkin`, {}), 'Checked in, eligibility verified');
+    else if (d.complete) act(() => call(`/api/visits/${d.complete}/complete`, {}), 'Visit completed, claim drafted');
+    else if (d.phone) { phonePatient = d.phone; renderPhone(); }
+    else if (d.reply) sendReply(d.reply);
+    else if (b.id === 'sweep') act(() => call('/api/sweep', {}), 'Sweep finished');
+  });
+  document.addEventListener('submit', e => {
+    const f = e.target; e.preventDefault();
+    const v = Object.fromEntries(new FormData(f));
+    if (f.id === 'vitals-form') act(() => call('/api/sim/vitals', { ...v, value: Number(v.value) }), 'Reading recorded');
+    else if (f.id === 'order-form') act(() => call('/api/sim/doctor-order', v), 'Signed order received');
+    else if (f.id === 'task-form') act(() => call('/api/tasks', { title: v.title, brief: v.title }), 'Task assigned to Cadence');
+    else if (f.id === 'phone-form') { const i = $('#phone-input'); if (i.value.trim()) { sendReply(i.value.trim()); i.value = ''; } }
+    if (f.id !== 'phone-form') f.reset();
+  });
+  $('#phone-patient').addEventListener('change', e => { phonePatient = e.target.value; renderPhone(); });
+  function sendReply(body) { act(() => call('/api/sim/patient-reply', { patient_id: phonePatient, body }), 'Reply sent, Cadence is on it'); }
+  window.addEventListener('hashchange', () => { tab = location.hash.slice(1) || 'approvals'; render(); });
+
+  let pending = null;
+  function connect() {
+    const es = new EventSource('/api/events');
+    es.onmessage = () => { clearTimeout(pending); pending = setTimeout(refresh, 250); };
+    es.onerror = () => { es.close(); setTimeout(connect, 3000); };
+  }
+  setInterval(() => { $('#clock').textContent = new Date().toLocaleTimeString(); }, 1000);
+  setInterval(health, 10000);
+  refresh().then(connect); health();
+})();
