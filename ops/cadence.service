@@ -1,0 +1,15 @@
+# Install: cp ops/cadence.service ~/.config/systemd/user/ && systemctl --user daemon-reload && systemctl --user enable --now cadence
+# Keep it running after logout: sudo loginctl enable-linger dell
+[Unit]
+Description=Cadence clinic service (UI, REST, MCP, always-on scheduler)
+After=network-online.target
+
+[Service]
+WorkingDirectory=/media/dell/Extreme SSD/cadence-gb10/cadence
+EnvironmentFile=-%h/.config/cadence/env
+ExecStart=%h/.local/share/cadence/venv/bin/python -m service.app
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
