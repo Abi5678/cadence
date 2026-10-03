@@ -2,6 +2,7 @@
    Views are shared with the receptionist console (clinic.js) and read the Cadence service on the GB10. */
 (() => {
   'use strict';
+  const root = window;
   const $ = (s, r = document) => r.querySelector(s);
   const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const tm = ts => ts ? new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
@@ -13,7 +14,7 @@
     rejected: 'bad', failed: 'bad', cancelled: 'bad', escalated: 'bad', inactive: 'bad', declined: 'bad' }[s] || '');
   const pill = s => `<span class="pill ${tone(s)}">${esc(String(s).replace(/_/g, ' '))}</span>`;
 
-  let S = null, phonePatient = 'P-104', pending = null;
+  let S = null, phonePatient = 'P-108', pending = null, STORY = null, seenSeq = 0;
   async function call(path, body) {
     const r = await fetch(path, body === undefined ? {} : { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     const data = await r.json().catch(() => ({}));
@@ -72,7 +73,7 @@
     voice() {
       const recs = S.recordings || [];
       return `<h1>Voice visits</h1><p class="lede">Doctors send a Slack voice clip after a visit. On this GB10, NVIDIA Parakeet transcribes it and Sortformer separates the speakers; the local model drafts the note, orders and follow-up for the doctor to sign. Nothing is signed or sent automatically.</p>
-      <form class="composer" id="lv-voice"><input type="file" name="file" accept="audio/*,video/*" required><input name="message" placeholder="Patient ID, e.g. P-104" style="max-width:220px"><button class="primary">Transcribe on GB10</button></form>
+      <form class="composer" id="lv-voice"><button type="button" class="primary" id="lv-dictate" title="Record on this machine; transcribed on the GB10">🎙 Dictate</button><input type="file" name="file" accept="audio/*,video/*"><input name="message" placeholder="Patient ID, e.g. P-104" style="max-width:220px"><button class="primary">Transcribe on GB10</button></form>
       ${recs.map(r => { const roles = (r.extraction || {}).roles || {}; return `<section class="card" style="margin-bottom:16px"><h2>${esc(r.patient_id || 'Unknown patient')} <small>${esc(r.id)} · ${tm(r.created_at)} · ${pill(r.status)} · ${r.duration_s ? esc(r.duration_s) + 's audio' : ''} ${r.timings && r.timings.asr_s ? `· ASR ${esc(r.timings.asr_s)}s · diarization ${esc(r.timings.diarization_s)}s · note ${esc(r.timings.llm_s)}s` : ''}</small></h2>
         ${(r.extraction || {}).summary ? `<p>${esc(r.extraction.summary)}</p>` : ''}
         <ul class="feed">${(r.segments || []).map(g => `<li><time>${Number(g.start).toFixed(1)}s</time><div><span class="k">${esc((roles[g.speaker] || g.speaker).toUpperCase())}</span><br>${esc(g.text)}</div></li>`).join('')}</ul></section>`; }).join('') || '<p class="empty">No recordings yet. Send a voice clip to the Cadence bot in Slack, or upload one above.</p>'}`;
@@ -137,6 +138,30 @@
     },
   };
 
+  const who = { agent: ['Agent', 'iris'], rule: ['Clinic rule', 'good'], human: ['Human', 'warn'] };
+  const ago = ms => { const s = Math.max(0, Math.round(ms / 1000)); return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + String(s % 60).padStart(2, '0') + 's'; };
+  function storyView() {
+    const st = STORY;
+    if (!st) return '<p class="empty">Loading the timeline…</p>';
+    const start = st.events.find(e => e.kind === 'provider.outage');
+    const p = st.proposals || {};
+    const col = doc => st.schedule.filter(a => a.provider_id === doc).map(a => `<div class="slot ${a.status === 'cancelled' ? 'gone' : a.status === 'open' ? (a.offered_to ? 'held' : 'open') : 'booked'}">
+        <time>${tm(a.starts_at)}</time><span>${a.status === 'open' ? (a.offered_to ? 'held for ' + esc(name(a.offered_to)) : 'open') : esc(a.patient || '')}</span>${a.status === 'cancelled' ? '<small>moved</small>' : ''}</div>`).join('');
+    return `<h1>Dr. Chen is out. Watch Cadence handle it.</h1>
+      <p class="lede">After hours, nobody at the desk. One Slack message from the doctor starts it; patients answer by text. Everything else below is Cadence, running on this GB10, inside the clinic's rules.</p>
+      <div class="story-kpis">
+        <div><b id="story-clock">${new Date().toLocaleTimeString()}</b><span>clinic time</span></div>
+        <div><b data-since="${esc(start ? start.created_at : '')}" id="story-elapsed">${start ? ago(Date.now() - Date.parse(start.created_at)) : '—'}</b><span>since the doctor's message</span></div>
+        <div class="zero"><b>${st.staff_clicks}</b><span>staff clicks</span></div>
+        <div><b>${st.humans.doctor} · ${st.humans.patients}</b><span>doctor · patient messages</span></div>
+        <div><b>${(p.offered || 0) + (p.accepted || 0) + (p.declined || 0) + (p.expired || 0)} · ${p.accepted || 0}</b><span>offers sent · accepted</span></div>
+      </div>
+      <div class="story-grid"><section class="card"><h2>Automation timeline <small>${st.events.length} steps</small></h2><ol class="timeline" id="timeline">
+        ${st.events.map(e => `<li class="${e.seq > seenSeq ? 'new' : ''}"><time>${tm(e.created_at)}<small>${new Date(e.created_at).getSeconds().toString().padStart(2, '0')}s</small></time><span class="pill ${who[e.who][1]}">${who[e.who][0]}</span><p>${esc(e.summary)}</p></li>`).join('') || '<li class="empty">Waiting for the doctor\'s message in Slack…</li>'}
+      </ol></section>
+      <section class="card"><h2>Tomorrow <small>live schedule</small></h2><div class="columns"><div><h3>Dr. Chen</h3>${col('DR-CHEN')}</div><div><h3>Dr. Patel</h3>${col('DR-PATEL')}</div></div></section></div>`;
+  }
+
   function phoneCard() {
     const thread = S.messages.filter(m => m.party === phonePatient && m.channel === 'sms').slice().reverse();
     return `<section class="card phone-card" aria-label="Patient phone simulator"><h2>Patient phone <small>simulated SMS</small></h2>
@@ -148,6 +173,7 @@
 
   // route -> [sidebar title, symbol, view]
   const PAGES = {
+    'live-story': ['Automation timeline', '⟳', () => storyView()],
     'live-approvals': ['Approvals', '✓', () => views.approvals()],
     'live-schedule': ['Patients & schedule', '◴', () => `<div class="live-split"><div>${views.schedule()}</div>${phoneCard()}</div>`],
     'live-voice': ['Voice visits', '◉', () => views.voice()],
@@ -195,6 +221,18 @@
     try {
       const [st, cc, rec] = await Promise.all([call('/api/state'), call('/api/ccm').catch(() => null), call('/api/recordings').catch(() => [])]);
       S = { ...st, ccm: cc, recordings: rec };
+      if (location.hash === '#live-story') {
+        STORY = await call('/api/story');
+        const fresh = STORY.events.filter(e => e.seq > seenSeq);
+        if (seenSeq && fresh.length && root.WeaverWork) {
+          if (fresh.some(e => /verified|accepted|packet/.test(e.kind))) WeaverWork.celebrate();
+          else if (fresh.some(e => e.who === 'agent' || e.who === 'rule')) { const done = WeaverWork.begin(); setTimeout(done, 1600); }
+        }
+        paint();
+        seenSeq = Math.max(seenSeq, ...STORY.events.map(e => e.seq), 0);
+        const tl = document.getElementById('timeline'); if (tl) tl.scrollTop = tl.scrollHeight;
+        return;
+      }
     } catch { S = null; }
     paint();
   }
@@ -247,6 +285,39 @@
     if (e.target.id === 'lv-phone-patient') { phonePatient = e.target.value; paint(); return; }
     const c = e.target.closest('.live-page input[data-consent]'); if (!c) return;
     act(() => call('/api/consents', { patient_id: c.dataset.consent, kind: c.dataset.kind, granted: c.checked }), 'Consent updated');
+  }, true);
+  setInterval(() => {
+    const c = document.getElementById('story-clock'); if (c) c.textContent = new Date().toLocaleTimeString();
+    const e = document.getElementById('story-elapsed'); if (e && e.dataset.since) e.textContent = ago(Date.now() - Date.parse(e.dataset.since));
+  }, 1000);
+  document.addEventListener('keydown', e => {
+    if (location.hash !== '#live-story' || e.target.closest('input,textarea,select') || e.metaKey || e.ctrlKey || e.altKey) return;
+    const go = { o: '/api/demo/outage', u: '/api/demo/upload', p: '/api/demo/packet' }[e.key];
+    if (go) { call(go, {}).then(refresh).catch(err => toast(err.message)); e.preventDefault(); }
+  });
+  // Scene 5: local dictation. Audio, transcript and draft stay on the GB10; Slack only gets "notes ready for review".
+  let dictation = null, dchunks = [];
+  document.addEventListener('click', async e => {
+    const b = e.target.closest('#lv-dictate'); if (!b) return;
+    e.stopPropagation();
+    if (dictation && dictation.state === 'recording') { dictation.stop(); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      dictation = new MediaRecorder(stream); dchunks = [];
+      dictation.ondataavailable = ev => { if (ev.data.size) dchunks.push(ev.data); };
+      dictation.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop()); b.classList.remove('recording'); b.textContent = '…';
+        const done = root.WeaverWork ? WeaverWork.begin() : () => {};
+        try {
+          const fd = new FormData(); fd.append('file', new Blob(dchunks, { type: dictation.mimeType || 'audio/webm' }), 'dictation.webm');
+          fd.append('message', (document.querySelector('#lv-voice input[name=message]') || {}).value || 'P-108'); fd.append('notify', '1');
+          toast('Transcribing and drafting on the GB10…');
+          const r = await fetch('/api/sim/voice', { method: 'POST', body: fd }); if (!r.ok) throw new Error('voice pipeline unavailable');
+          toast('Notes ready for review'); if (root.WeaverWork) WeaverWork.celebrate(); refresh();
+        } catch (err) { toast(err.message); } finally { b.textContent = '🎙 Dictate'; done(); }
+      };
+      dictation.start(); b.classList.add('recording'); b.textContent = '■ Stop';
+    } catch (err) { toast('Microphone unavailable: ' + err.message); }
   }, true);
   function sendReply(body) { act(() => call('/api/sim/patient-reply', { patient_id: phonePatient, body }), 'Reply sent, Cadence is on it'); }
 

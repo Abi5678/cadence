@@ -41,3 +41,24 @@
 .phone-card .phone-form{display:flex;gap:6px}.phone-card .phone-form input{flex:1;border:1px solid var(--line);border-radius:20px;padding:8px 12px;min-width:0}
 @media (max-width:1100px){.live-split{grid-template-columns:1fr}.phone-card{position:static}}
 @media (max-width:760px){.live-page form.inline{grid-template-columns:1fr}}
+/* Automation timeline */
+.story-kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:0 0 20px}
+.story-kpis div{background:#fffefa;border:1px solid #dcdce3;border-radius:14px;padding:12px 14px}
+.story-kpis b{display:block;font-family:var(--serif);font-weight:400;font-size:28px;line-height:1.15;font-variant-numeric:tabular-nums}
+.story-kpis span{font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--muted)}
+.story-kpis .zero b{color:#2d6a45}
+.story-grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:18px;align-items:start}
+.live-page .timeline{list-style:none;margin:0;padding:0;max-height:520px;overflow:auto}
+.live-page .timeline li{display:grid;grid-template-columns:78px 92px 1fr;gap:10px;align-items:start;padding:8px 4px;border-bottom:1px solid #eeeef0;font-size:13.5px}
+.live-page .timeline li p{margin:0}.live-page .timeline time{font-variant-numeric:tabular-nums;color:var(--muted);font-size:12px}
+.live-page .timeline time small{margin-left:3px}
+.live-page .timeline li.new{animation:story-in .6s ease;background:#f4f3fb}
+@keyframes story-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.live-page .columns{display:grid;grid-template-columns:1fr 1fr;gap:12px}.live-page .columns h3{font-size:13px;margin:0 0 8px;color:var(--muted)}
+.live-page .slot{display:grid;grid-template-columns:62px 1fr;gap:6px;padding:7px 9px;border:1px solid var(--line);border-radius:9px;margin-bottom:6px;font-size:13px;transition:background .4s}
+.live-page .slot time{color:var(--muted);font-size:12px}.live-page .slot small{grid-column:2;color:var(--muted);font-size:11px}
+.live-page .slot.booked{background:#fff}.live-page .slot.open{border-style:dashed;color:var(--muted)}
+.live-page .slot.held{background:#fbf0dc;border-color:#e3c48b}.live-page .slot.gone{opacity:.45;text-decoration:line-through}
+#lv-dictate.recording{background:#d9534f;border-color:#d9534f;color:#fff}
+@media (max-width:1100px){.story-kpis{grid-template-columns:repeat(2,1fr)}.story-grid{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){.live-page .timeline li.new{animation:none}}

@@ -184,3 +184,21 @@ class CheckinCoverageNotesPacket(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RecordedStoryData(unittest.TestCase):
+    def test_seeded_day_plays_end_to_end(self):
+        from service import clinic, db, demo_story
+        conn = db.connect(":memory:")
+        db.seed(conn)
+        self.assertTrue(demo_story.seed_story(conn)["seeded"])
+        self.assertFalse(demo_story.seed_story(conn)["seeded"])  # idempotent
+        out = demo_story.handle_provider_outage(conn, "DR-CHEN", "I'm out sick tomorrow, please reschedule my appointments", "9.1")
+        self.assertEqual(sum(1 for o in out["offers"] if o.get("offered")), 8)
+        bob = [o for o in out["offers"] if o.get("patient_id") == "P-108"][0]
+        text = db.one(conn.execute("SELECT body FROM messages WHERE party='P-108' AND direction='out'"))["body"]
+        self.assertIn("Dr. Patel at", text)
+        self.assertIn("10:30 AM", text)
+        clinic.record_patient_reply(conn, "P-108", f"YES {bob['proposal_id']}")
+        new = demo_story.bob_new_appointment(conn)
+        self.assertEqual(db.one(conn.execute("SELECT provider_id FROM appointments WHERE id=?", (new,)))["provider_id"], "DR-PATEL")
