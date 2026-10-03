@@ -147,7 +147,7 @@ def handle_provider_outage(conn, provider_id: str, text: str, slack_ref: str, ap
         dedupe_key=f"outage:{provider_id}:{slack_ref}")
     conn.execute("INSERT OR REPLACE INTO kv VALUES (?,?)", (f"outage:{slack_ref}", task["id"]))
     emit(conn, task["id"], "provider.outage", prov["id"],
-         f"{prov['name']} outage from Slack — no human prompt",
+         f"{prov['name']} outage " + ("(backup trigger, not Slack)" if str(slack_ref).startswith("director") else "from Slack") + " — no human prompt",
          {"slack_ref": slack_ref, "appointments": [a["id"] for a in targets]})
     offers = []
     for a in targets:

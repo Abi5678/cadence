@@ -520,11 +520,14 @@ def story(since: str | None = None):
             "SELECT id FROM tasks WHERE kind IN ('monitoring','inventory','staffing','insurance','ccm','chat','orders') AND created_at>=?", (since,)))}
         chronic = __import__("re").compile(r"\bP-2\d\d\b")  # the always-on chronic-care stream is a different scene
         evs = [e for e in evs if e["kind"].startswith(STORY_KINDS) and e["task_id"] not in noise_tasks
+               and e["kind"] not in ("approval.prepared", "approval.attempted")
                and not chronic.search(e["summary"] or "") and not (e["summary"] or "").startswith(("Escalate ", "Confirmation request", "Aftercare"))]
         for e in evs:
             a = (e["actor"] or "").lower()
+            e["_h"] = 0 if e["kind"] in ("provider.outage", "patient.reply") else 1
             e["who"] = ("human" if a in HUMAN_ACTORS or a.startswith(("dr-", "p-")) and e["kind"] in ("provider.outage", "patient.reply", "order.signed")
                         else "agent" if a in ("agent", "hermes", "model") else "rule")
+        evs.sort(key=lambda e: (e["created_at"], e.pop("_h"), e["seq"]))  # a human message reads before what it caused
         decided = rows(conn.execute("SELECT decided_by FROM approvals WHERE decided_at>=? AND decided_by IS NOT NULL", (since,)))
         staff_clicks = sum(1 for d in decided if not d["decided_by"].startswith("policy:")) + \
             sum(1 for e in evs if e["kind"] in ("coordinator.reply",))

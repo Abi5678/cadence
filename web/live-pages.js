@@ -196,10 +196,10 @@
     if (!S) { $('#app').innerHTML = '<p class="empty">Connecting to the GB10…</p>'; return; }
     const busy = document.activeElement && $('#app').contains(document.activeElement) && document.activeElement.closest('form');
     if (!busy) $('#app').innerHTML = page[2]();
-    const nav = $('#navigation'), first = nav.querySelector('a[href="#live-approvals"]');
+    const nav = $('#navigation'), first = nav.querySelector('a[href="#live-story"]');
     if (first && !nav.querySelector('.nav-divider')) first.insertAdjacentHTML('beforebegin', '<span class="nav-divider">LIVE CLINIC · GB10</span>');
     const n = S.approvals.filter(a => a.state === 'prepared').length, a = nav.querySelector('a[href="#live-approvals"]');
-    if (a && n) a.insertAdjacentHTML('beforeend', `<span class="nav-count">${n}</span>`);
+    if (a) { a.querySelectorAll('.nav-count').forEach(x => x.remove()); if (n) a.insertAdjacentHTML('beforeend', `<span class="nav-count">${n}</span>`); }
   }
 
   const previous = render;  // coordinator's render (already wrapped by the Weaver)
@@ -209,7 +209,7 @@
     previous.apply(this, args);  // builds the sidebar (with our pages) and the coordinator's own views
     const nav = $('#navigation');
     if (nav && !nav.querySelector('.nav-divider')) {
-      const first = nav.querySelector('a[href="#live-approvals"]');
+      const first = nav.querySelector('a[href="#live-story"]');
       if (first) first.insertAdjacentHTML('beforebegin', '<span class="nav-divider">LIVE CLINIC · GB10</span>');
     }
     if (PAGES[route]) { paint(); refresh(); }
