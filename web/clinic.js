@@ -85,7 +85,7 @@
       <div class="composer"><button class="primary" id="ccm-close">Run month-end close for ${esc(c.month)}</button><span class="pill iris">${ready.length} packets ready · ${usd(ready.reduce((a, k) => a + k.result.billed, 0))}</span></div>
       <div class="grid"><section class="card" style="grid-column:1/-1"><h2>Audit packets <small>${esc(c.month)}</small></h2><table><tr><th>Patient</th><th>Codes</th><th>Checks</th><th>Agent work (not billed)</th><th>Status</th><th></th></tr>
       ${c.packets.map(k => { const r = k.result; return `<tr><td>${esc(r.patient)}<br><small>${esc(k.patient_id)}</small></td>
-        <td>${r.codes.map(x => `${esc(x.code)}${x.units > 1 ? '×' + x.units : ''}`).join(', ') || '—'}<br><strong>${usd(r.billed)}</strong></td>
+        <td class="nowrap">${r.codes.map(x => `${esc(x.code)}${x.units > 1 ? '×' + x.units : ''}`).join(', ') || '—'}<br><strong>${usd(r.billed)}</strong></td>
         <td>${r.checks.map(x => `<span class="pill ${x.ok ? 'good' : 'bad'}" title="${esc(x.detail)}">${x.ok ? '✓' : '✗'} ${esc(x.check)}</span>`).join(' ')}</td>
         <td><small>${esc(r.agent.actions)} actions / ${esc(r.agent.minutes)} min</small></td><td>${pill(k.status)}</td>
         <td class="row-actions">${k.status === 'needs_review' ? `<button class="approve" data-kreview="${esc(k.id)}">Approve</button><button data-kreturn="${esc(k.id)}">Return</button>` : ''}${k.status === 'awaiting_attestation' ? `<small>waiting for doctor CONFIRM ${esc(k.id)}</small><button class="mini" data-kattest="${esc(k.id)}">Attest (demo)</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">No packets yet. Run month-end close.</td></tr>'}</table></section>
