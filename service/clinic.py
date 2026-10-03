@@ -14,11 +14,14 @@ Safety rules enforced here, not in the prompt:
 from __future__ import annotations
 
 import json
+import os
 from datetime import timedelta
+from zoneinfo import ZoneInfo
 
 from . import adapters
 from .db import emit, iso, new_id, now, one, parse, rows
 
+CLINIC_TZ = ZoneInfo(os.environ.get("CADENCE_TZ", "America/New_York"))
 OFFER_MINUTES = 30
 CONFIRM_WINDOW_HOURS = 48
 
@@ -35,6 +38,12 @@ VITAL_LIMITS = {
 
 class ClinicError(ValueError):
     pass
+
+
+def local(ts: str) -> str:
+    """Clinic-local wording for patient messages, e.g. 'Sun Oct 4 at 10:00 AM'."""
+    d = parse(ts).astimezone(CLINIC_TZ)
+    return d.strftime(f"%a %b {d.day} at {d.strftime('%I').lstrip('0')}:%M %p")
 
 
 # ---------------------------------------------------------------- tasks & events
@@ -148,7 +157,7 @@ def request_confirmation(conn, appt_id: str, task_id: str | None = None) -> dict
     if a["status"] != "booked" or a["confirmation"] != "none":
         return a
     p = one(conn.execute("SELECT name FROM patients WHERE id=?", (a["patient_id"],)))
-    when = parse(a["starts_at"]).strftime("%a %b %d %H:%M UTC")
+    when = local(a["starts_at"])
     body = f"Hi {p['name'].split()[0]}, this is the clinic confirming your visit on {when}. Reply YES to confirm, NO to cancel, or RESCHEDULE."
     propose(conn, task_id, "patient_template_message", {"patient_id": a["patient_id"], "body": body, "ref": appt_id},
             f"Confirmation request for {appt_id}", dedupe_key=f"confirm-req:{appt_id}")
@@ -227,8 +236,10 @@ def offer_slot_to_waitlist(conn, slot_id: str, task_id: str | None = None) -> di
         "SELECT w.*, p.name FROM waitlist w JOIN patients p ON p.id=w.patient_id WHERE w.status='waiting' "
         "AND (w.provider_id IS NULL OR w.provider_id=?) AND w.patient_id NOT IN "
         "(SELECT patient_id FROM appointments WHERE starts_at=? AND patient_id IS NOT NULL) "
-        "AND w.patient_id NOT IN (SELECT patient_id FROM slot_declines WHERE slot_id=?) ORDER BY priority, added_at LIMIT 1",
-        (s["provider_id"], s["starts_at"], slot_id)))
+        "AND w.patient_id NOT IN (SELECT patient_id FROM slot_declines WHERE slot_id=?) "
+        "AND w.patient_id NOT IN (SELECT patient_id FROM appointments WHERE patient_id IS NOT NULL "
+        "  AND status IN ('booked','confirmed') AND starts_at <= ?) ORDER BY priority, added_at LIMIT 1",
+        (s["provider_id"], s["starts_at"], slot_id, s["starts_at"])))
     if not cand:
         conn.execute("UPDATE appointments SET offered_to=NULL, offer_expires_at=NULL WHERE id=?", (slot_id,))
         emit(conn, task_id, "waitlist.empty", "service", f"No waitlist candidate for {slot_id}")
@@ -236,7 +247,7 @@ def offer_slot_to_waitlist(conn, slot_id: str, task_id: str | None = None) -> di
     exp = now() + timedelta(minutes=OFFER_MINUTES)
     conn.execute("UPDATE appointments SET offered_to=?, offer_expires_at=? WHERE id=?", (cand["patient_id"], iso(exp), slot_id))
     conn.execute("UPDATE waitlist SET status='offered' WHERE id=?", (cand["id"],))
-    when = parse(s["starts_at"]).strftime("%a %b %d %H:%M UTC")
+    when = local(s["starts_at"])
     body = (f"Hi {cand['name'].split()[0]}, an earlier visit opened on {when}. Reply YES within {OFFER_MINUTES} minutes "
             "to take it, or NO to keep your place on the waitlist.")
     propose(conn, task_id, "patient_template_message", {"patient_id": cand["patient_id"], "body": body, "ref": slot_id},

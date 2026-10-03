@@ -46,8 +46,22 @@ class AppointmentLoop(unittest.TestCase):
         conn = fresh()
         slot = clinic.cancel_appointment(conn, "A-204")["open_slot"]
         clinic.offer_slot_to_waitlist(conn, slot)
+        conn.execute("UPDATE appointments SET status='cancelled' WHERE id='A-203'")  # P-103 has no earlier visit
         nxt = clinic.decline_offer(conn, slot, "P-107")
         self.assertEqual(nxt["offered_to"], "P-103")
+
+    def test_offer_skips_patients_already_booked_earlier(self):
+        conn = fresh()
+        conn.execute("UPDATE waitlist SET status='placed' WHERE id='W-1'")  # only P-103 left, booked Sun 09:00
+        slot = clinic.cancel_appointment(conn, "A-204")["open_slot"]  # Sun 10:00, later than P-103's visit
+        self.assertIsNone(clinic.offer_slot_to_waitlist(conn, slot)["offered_to"])
+
+    def test_messages_use_clinic_time(self):
+        conn = fresh()
+        clinic.request_confirmation(conn, "A-203")
+        body = db.one(conn.execute("SELECT body FROM messages WHERE ref='A-203'"))["body"]
+        self.assertNotIn("UTC", body)
+        self.assertIn(" at ", body)
 
     def test_reschedule(self):
         conn = fresh()
