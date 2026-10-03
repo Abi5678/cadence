@@ -136,8 +136,9 @@ class AgentRunner:
         b = backend()
         if b == "off":
             return
+        from . import clinic
         with mcp_tools.LOCK:
-            task = json.loads(mcp_tools.TOOLS["get_task"](task_id))
+            task = clinic.get_task(self.conn, task_id)  # internal read, not an agent tool call
         try:
             text = await (run_hermes(self.conn, task) if b == "hermes" else run_direct(self.conn, task))
             with mcp_tools.LOCK:

@@ -268,7 +268,8 @@ def offer_slot_to_waitlist(conn, slot_id: str, task_id: str | None = None) -> di
         (s["provider_id"], s["starts_at"], slot_id, s["starts_at"])))
     if not cand:
         conn.execute("UPDATE appointments SET offered_to=NULL, offer_expires_at=NULL WHERE id=?", (slot_id,))
-        emit(conn, task_id, "waitlist.empty", "service", f"No waitlist candidate for {slot_id}")
+        if not one(conn.execute("SELECT 1 AS x FROM events WHERE kind='waitlist.empty' AND summary LIKE ?", (f"%{slot_id}",))):
+            emit(conn, task_id, "waitlist.empty", "service", f"No waitlist candidate for {slot_id}")  # once per slot
         return {"slot": slot_id, "offered_to": None}
     exp = now() + timedelta(minutes=OFFER_MINUTES)
     conn.execute("UPDATE appointments SET offered_to=?, offer_expires_at=? WHERE id=?", (cand["patient_id"], iso(exp), slot_id))

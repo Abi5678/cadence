@@ -73,7 +73,7 @@ def state():
     def q(sql, *a):
         return rows(conn.execute(sql, a))
     with mcp_tools.LOCK:
-        dash = json.loads(mcp_tools.TOOLS["clinic_dashboard"]())
+        dash = json.loads(json.dumps(mcp_tools.dashboard_data(), default=str))
         return {
             **dash,
             "appointments": clinic.list_appointments(conn),
@@ -312,6 +312,13 @@ async def voice_command(file: UploadFile = File(...)):
     except Exception as e:  # noqa: BLE001
         raise HTTPException(503, f"speech service unavailable: {type(e).__name__}") from e
     return {"text": " ".join(s["text"] for s in asr["segments"]).strip(), "timings": asr["timings"], "duration_s": asr.get("duration_s")}
+
+
+@api.get("/api/impact")
+def impact_now():
+    from . import impact
+    with mcp_tools.LOCK:
+        return impact.today(conn)
 
 
 @api.get("/api/telemetry")

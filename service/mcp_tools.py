@@ -62,9 +62,8 @@ def finish_task(task_id: str, status: str, summary: str) -> dict:
     return clinic.set_task_status(_conn, task_id, status, summary[:500])
 
 
-@tool
-def clinic_dashboard() -> dict:
-    """One-call overview: today's/tomorrow's schedule, open slots, waitlist, pending approvals, low stock, open shifts, unrouted orders."""
+def dashboard_data() -> dict:
+    """Plain (unlogged) dashboard for the UI; the agent's tool below wraps it."""
     return {
         "today": clinic.list_appointments(_conn, 0),
         "tomorrow": clinic.list_appointments(_conn, 1),
@@ -75,6 +74,12 @@ def clinic_dashboard() -> dict:
         "open_shifts": clinic.staffing_overview(_conn)["open_shifts"],
         "unrouted_orders": clinic.list_orders(_conn, "received"),
     }
+
+
+@tool
+def clinic_dashboard() -> dict:
+    """One-call overview: today's/tomorrow's schedule, open slots, waitlist, pending approvals, low stock, open shifts, unrouted orders."""
+    return dashboard_data()
 
 
 # ---- appointments, waitlist, patient comms ---------------------------------

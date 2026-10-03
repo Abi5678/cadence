@@ -19,12 +19,16 @@ header button.hot{border-color:var(--champ);color:var(--champ)}
 .ribbons{position:absolute;left:0;right:0;top:64px;height:150px;pointer-events:none;opacity:.55}
 .ribbons path{fill:none;stroke-linecap:round;stroke-dasharray:14 22;animation:flow var(--flow,6s) linear infinite}
 @keyframes flow{to{stroke-dashoffset:-360}}
-main{position:relative;display:grid;grid-template-columns:1fr 380px;grid-template-rows:auto 1fr;gap:16px;padding:14px 26px 22px;height:calc(100% - 64px)}
+main{position:relative;display:grid;grid-template-columns:1fr 380px;grid-template-rows:auto auto 1fr;gap:16px;padding:14px 26px 22px;height:calc(100% - 64px)}
 .kpis{grid-column:1/-1;display:grid;grid-template-columns:repeat(7,1fr);gap:12px;z-index:1}
 .kpi{background:#18223bcc;border:1px solid var(--line);border-radius:14px;padding:12px 14px;backdrop-filter:blur(6px)}
 .kpi b{display:block;font-family:var(--serif);font-weight:400;font-size:30px;line-height:1.1;font-variant-numeric:tabular-nums}
 .kpi span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.2px}
-.kpi.accent b{color:var(--iris)}.kpi.money b{color:var(--champ)}
+.kpi.accent b{color:var(--iris)}
+.impact{grid-column:1/-1;display:flex;align-items:center;gap:22px;padding:12px 18px;border-radius:14px;border:1px solid #d4b88f66;background:linear-gradient(90deg,#d4b88f1f,#8f8cf014);z-index:1;flex-wrap:wrap}
+.impact .big{font-family:var(--serif);font-size:34px;line-height:1;color:var(--champ)}.impact .lbl{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1.3px}
+.impact .chips{display:flex;gap:8px;flex-wrap:wrap;flex:1;justify-content:flex-end}.impact .chips span{font-size:12px;background:#121a2e;border:1px solid var(--line);border-radius:20px;padding:4px 10px;color:#cfd2e6}
+.impact .chips b{color:var(--text)}.kpi.money b{color:var(--champ)}
 section{background:#18223bcc;border:1px solid var(--line);border-radius:16px;padding:14px 16px;min-height:0;display:flex;flex-direction:column;z-index:1}
 section h2{margin:0 0 10px;font:500 12px var(--sans);text-transform:uppercase;letter-spacing:1.6px;color:var(--muted);display:flex;gap:10px;align-items:center}
 section h2 em{font-style:normal;color:var(--text);text-transform:none;letter-spacing:0}
@@ -83,6 +87,10 @@ section h2 em{font-style:normal;color:var(--text);text-transform:none;letter-spa
     <div class="kpi money"><b id="k-ccm">$0</b><span>CCM ready for review</span></div>
     <div class="kpi money"><b id="k-paid">$0</b><span>Medicare paid (mock)</span></div>
   </div>
+  <div class="impact" id="impact" title=""><div><div class="big" id="i-hours">0 h</div><div class="lbl">staff time saved today (estimate)</div></div>
+    <div><div class="big" id="i-actions" style="color:var(--text)">0</div><div class="lbl">actions taken by the agent</div></div>
+    <div><div class="big" id="i-usd">$0</div><div class="lbl">chronic-care revenue identified</div></div>
+    <div class="chips" id="i-chips"></div></div>
   <section><h2>Remote monitoring <em id="mon-count"></em></h2><div class="tiles" id="tiles"></div></section>
   <div class="right">
     <section><h2>GB10</h2><div class="gpu">
@@ -153,6 +161,16 @@ section h2 em{font-style:normal;color:var(--text);text-transform:none;letter-spa
   $('#close').onclick = () => fetch('/api/ccm/close', {method: 'POST'});
   $('#replay-btn').onclick = () => showReplay(new Date(Date.now() - 36e5).toISOString().replace(/\.\d+Z$/, '+00:00'));
   $('#replay-close').onclick = () => $('#replay').classList.remove('show');
+  async function impact() {
+    try {
+      const d = await (await fetch('/api/impact')).json();
+      $('#i-hours').textContent = d.hours_saved_estimate.toFixed(1) + ' h'; $('#i-actions').textContent = d.actions;
+      $('#i-usd').textContent = money(d.ccm_identified_usd);
+      $('#i-chips').innerHTML = d.items.filter(i => i.count).map(i => `<span title="${esc(i.minutes_each_estimate)} min each (estimate)"><b>${esc(i.count)}</b> ${esc(i.label.toLowerCase())}</span>`).join('');
+      $('#impact').title = d.note;
+    } catch {}
+  }
+  impact(); setInterval(impact, 5000);
   function connect() { const es = new EventSource('/api/events'); es.onmessage = m => { try { river(JSON.parse(m.data)); } catch {} }; es.onerror = () => { es.close(); setTimeout(connect, 3000); }; }
   setInterval(() => $('#clock').textContent = new Date().toLocaleTimeString(), 1000);
   telemetry(); setInterval(telemetry, 3000); connect();
