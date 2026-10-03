@@ -24,6 +24,7 @@ from .db import emit, iso, new_id, now, one, parse, rows
 CLINIC_TZ = ZoneInfo(os.environ.get("CADENCE_TZ", "America/New_York"))
 OFFER_MINUTES = 30
 CONFIRM_WINDOW_HOURS = 48
+REMINDER_HOURS = 3
 
 # Aftercare answers containing any of these are escalated to the doctor. This is a routing rule,
 # not a clinical judgment: the doctor decides what it means.
@@ -84,9 +85,30 @@ def set_task_status(conn, task_id: str, status: str, note: str = "") -> dict:
 AUTO_ACTIONS = {"patient_template_message", "escalate_to_doctor"}
 
 
+PATIENT_CONSENT = {"patient_template_message": "sms", "patient_message": "sms", "send_document": "documents"}
+
+
+def has_consent(conn, patient_id: str, kind: str) -> bool:
+    r = one(conn.execute("SELECT granted FROM consents WHERE patient_id=? AND kind=?", (patient_id, kind)))
+    return bool(r and r["granted"])
+
+
+def set_consent(conn, patient_id: str, kind: str, granted: bool, by: str) -> dict:
+    if kind not in ("sms", "documents"):
+        raise ClinicError("consent kind must be sms or documents")
+    conn.execute("INSERT INTO consents VALUES (?,?,?,?,?) ON CONFLICT(patient_id,kind) DO UPDATE SET granted=excluded.granted, "
+                 "recorded_at=excluded.recorded_at, recorded_by=excluded.recorded_by", (patient_id, kind, int(granted), iso(now()), by))
+    emit(conn, None, "consent.updated", by, f"{patient_id} {kind} consent {'granted' if granted else 'withdrawn'}")
+    return {"patient_id": patient_id, "kind": kind, "granted": granted}
+
+
 def propose(conn, task_id: str | None, action: str, payload: dict, summary: str, dedupe_key: str | None = None) -> dict:
     if action not in adapters.EXECUTORS:
         raise ClinicError(f"unknown action {action}")
+    need = PATIENT_CONSENT.get(action)
+    if need and not has_consent(conn, payload["patient_id"], need):
+        emit(conn, task_id, "consent.missing", "service", f"{payload['patient_id']} has no {need} consent: '{summary}' not sent")
+        raise ClinicError(f"{payload['patient_id']} has not consented to {need}; ask the front desk to contact them another way")
     if dedupe_key:
         existing = one(conn.execute("SELECT * FROM approvals WHERE dedupe_key=?", (dedupe_key,)))
         if existing:
@@ -159,9 +181,13 @@ def request_confirmation(conn, appt_id: str, task_id: str | None = None) -> dict
     p = one(conn.execute("SELECT name FROM patients WHERE id=?", (a["patient_id"],)))
     when = local(a["starts_at"])
     body = f"Hi {p['name'].split()[0]}, this is the clinic confirming your visit on {when}. Reply YES to confirm, NO to cancel, or RESCHEDULE."
-    propose(conn, task_id, "patient_template_message", {"patient_id": a["patient_id"], "body": body, "ref": appt_id},
-            f"Confirmation request for {appt_id}", dedupe_key=f"confirm-req:{appt_id}")
-    conn.execute("UPDATE appointments SET confirmation='requested', version=version+1 WHERE id=?", (appt_id,))
+    try:
+        propose(conn, task_id, "patient_template_message", {"patient_id": a["patient_id"], "body": body, "ref": appt_id},
+                f"Confirmation request for {appt_id}", dedupe_key=f"confirm-req:{appt_id}")
+        state = "requested"
+    except ClinicError:
+        state = "call_needed"  # no SMS consent: front desk phones the patient
+    conn.execute("UPDATE appointments SET confirmation=?, version=version+1 WHERE id=?", (state, appt_id))
     return _appt(conn, appt_id)
 
 
@@ -280,6 +306,9 @@ def record_patient_reply(conn, patient_id: str, body: str) -> dict:
     """Inbound patient text. Stored as data; the agent interprets it, never as instructions."""
     mid = new_id("M")
     conn.execute("INSERT INTO messages VALUES (?,?,?,?,?,?,?)", (mid, "sms", "in", patient_id, body[:1000], None, iso(now())))
+    if body.strip().upper() in ("STOP", "UNSUBSCRIBE"):
+        set_consent(conn, patient_id, "sms", False, f"patient:{patient_id}")
+        return {"message_id": mid, "sms_consent": "withdrawn"}
     emit(conn, None, "patient.reply", patient_id, body[:200], {"message_id": mid, "patient_id": patient_id})
     return {"message_id": mid}
 
@@ -397,7 +426,11 @@ def complete_visit(conn, appt_id: str, task_id: str | None = None) -> dict:
     claim = propose(conn, task_id, "submit_claim", {"charge_id": charge["id"]}, f"Submit claim for {appt_id} ($140.00)",
                     dedupe_key=f"claim:{appt_id}")
     ac = schedule_aftercare(conn, appt_id)
-    return {"appointment_id": appt_id, "claim_approval": claim["id"], "aftercare_id": ac["id"]}
+    prov = one(conn.execute("SELECT name FROM providers WHERE id=?", (a["provider_id"],)))
+    doc = create_document(conn, a["patient_id"], "visit_summary", f"Visit summary: {a['reason'] or 'visit'}",
+                          f"Administrative visit summary (synthetic). Visit on {local(a['starts_at'])} with {prov['name']}. "
+                          f"Reason: {a['reason'] or 'n/a'}. Follow-up check-in scheduled. Billing statement to follow.", appt_id)
+    return {"appointment_id": appt_id, "claim_approval": claim["id"], "aftercare_id": ac["id"], "document_id": doc["id"]}
 
 
 def billing_summary(conn, patient_id: str | None = None) -> list[dict]:
@@ -421,7 +454,8 @@ def record_signed_order(conn, kind: str, patient_id: str, provider_id: str, deta
         raise ClinicError("kind must be lab or rx")
     oid = new_id("O")
     ts = iso(now())
-    conn.execute("INSERT INTO orders VALUES (?,?,?,?,?,?,?,?,?,?)", (oid, kind, patient_id, provider_id, detail, provider_id, ts, "received", ts, source))
+    conn.execute("INSERT INTO orders (id,kind,patient_id,provider_id,detail,signed_by,signed_at,status,created_at,source) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                 (oid, kind, patient_id, provider_id, detail, provider_id, ts, "received", ts, source))
     emit(conn, None, "order.received", provider_id, f"Signed {kind} order {oid} for {patient_id}")
     return one(conn.execute("SELECT * FROM orders WHERE id=?", (oid,)))
 
@@ -441,6 +475,98 @@ def route_order(conn, order_id: str, task_id: str | None = None) -> dict:
                  dedupe_key=f"route:{order_id}")
     conn.execute("UPDATE orders SET status='pending_approval' WHERE id=?", (order_id,))
     return {"order_id": order_id, "approval_id": ap["id"], "state": ap["state"]}
+
+
+# ---------------------------------------------------------------- documents
+
+def create_document(conn, patient_id: str, kind: str, title: str, body: str, ref: str | None = None, status: str = "released") -> dict:
+    did = new_id("D")
+    conn.execute("INSERT INTO documents (id,patient_id,kind,title,body,status,ref,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                 (did, patient_id, kind, title, body, status, ref, iso(now())))
+    emit(conn, None, "document.created", "service", f"{title} for {patient_id} ({status.replace('_', ' ')})", {"document_id": did})
+    return one(conn.execute("SELECT * FROM documents WHERE id=?", (did,)))
+
+
+def list_documents(conn, patient_id: str | None = None) -> list[dict]:
+    if patient_id:
+        return rows(conn.execute("SELECT * FROM documents WHERE patient_id=? ORDER BY created_at DESC", (patient_id,)))
+    return rows(conn.execute("SELECT * FROM documents ORDER BY created_at DESC LIMIT 60"))
+
+
+def send_document(conn, document_id: str, task_id: str | None = None) -> dict:
+    d = one(conn.execute("SELECT * FROM documents WHERE id=?", (document_id,)))
+    if not d:
+        raise ClinicError(f"unknown document {document_id}")
+    if d["status"] == "needs_release":
+        raise ClinicError(f"{document_id} must be released by the doctor before it can be shared")
+    return propose(conn, task_id, "send_document", {"patient_id": d["patient_id"], "document_id": document_id},
+                   f"Send '{d['title']}' to {d['patient_id']}", dedupe_key=f"senddoc:{document_id}")
+
+
+# ---------------------------------------------------------------- doctor orders via Slack
+
+def provider_by_slack(conn, slack_user: str) -> dict:
+    p = one(conn.execute("SELECT * FROM providers WHERE slack_user=?", (slack_user,)))
+    if not p:
+        raise ClinicError(f"Slack user {slack_user} is not a registered provider")
+    return p
+
+
+def draft_doctor_order(conn, doctor_slack_user: str, patient_id: str, kind: str, detail: str, task_id: str | None = None) -> dict:
+    """Draft an order from a doctor's Slack message. It is NOT signed: the service asks the doctor to reply
+    CONFIRM <id> in Slack and verifies that reply itself (see slack_sync.py)."""
+    if kind not in ("lab", "rx"):
+        raise ClinicError("kind must be lab or rx")
+    prov = provider_by_slack(conn, doctor_slack_user)
+    if not one(conn.execute("SELECT id FROM patients WHERE id=?", (patient_id,))):
+        raise ClinicError(f"unknown patient {patient_id}; use find_patient")
+    oid = new_id("O")
+    ts = iso(now())
+    conn.execute("INSERT INTO orders (id,kind,patient_id,provider_id,detail,status,created_at,source) VALUES (?,?,?,?,?,?,?,?)",
+                 (oid, kind, patient_id, prov["id"], detail[:500], "awaiting_signature", ts, "slack"))
+    emit(conn, task_id, "order.drafted", "agent", f"Drafted {kind} order {oid} for {patient_id}: {detail[:80]}", {"order_id": oid})
+    adapters.slack_dm(conn, prov["id"], f"Drafted {kind} order *{oid}* for {patient_id}: {detail[:300]}\n"
+                                        f"Reply `CONFIRM {oid}` to sign it, or `CANCEL {oid}`.")
+    return one(conn.execute("SELECT * FROM orders WHERE id=?", (oid,)))
+
+
+def sign_order(conn, order_id: str, provider_id: str, signature_ref: str) -> dict:
+    """Called only by the Slack sync after it verified the doctor's own CONFIRM message."""
+    o = one(conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)))
+    if not o or o["status"] != "awaiting_signature" or o["provider_id"] != provider_id:
+        return o or {}
+    conn.execute("UPDATE orders SET signed_by=?, signed_at=?, signature_ref=?, status='received' WHERE id=?",
+                 (provider_id, iso(now()), signature_ref, order_id))
+    emit(conn, None, "order.signed", provider_id, f"{order_id} signed in Slack (message {signature_ref})")
+    route_order(conn, order_id)
+    return one(conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)))
+
+
+def cancel_order(conn, order_id: str, provider_id: str) -> None:
+    conn.execute("UPDATE orders SET status='cancelled' WHERE id=? AND provider_id=? AND status IN ('awaiting_signature','received')",
+                 (order_id, provider_id))
+    emit(conn, None, "order.cancelled", provider_id, f"{order_id} cancelled by provider")
+
+
+def release_document(conn, document_id: str, provider_id: str) -> None:
+    d = one(conn.execute("SELECT * FROM documents WHERE id=?", (document_id,)))
+    if d and d["status"] == "needs_release":
+        conn.execute("UPDATE documents SET status='released', released_by=? WHERE id=?", (provider_id, document_id))
+        emit(conn, None, "document.released", provider_id, f"{d['title']} released for {d['patient_id']}")
+
+
+def lab_results_due(conn) -> list[str]:
+    """Mock lab: results arrive a couple of minutes after the order is sent."""
+    done = []
+    for o in rows(conn.execute("SELECT * FROM orders WHERE status='sent_to_lab' AND result_due_at <= ?", (iso(now()),))):
+        conn.execute("UPDATE orders SET status='resulted' WHERE id=?", (o["id"],))
+        doc = create_document(conn, o["patient_id"], "lab_result", f"Lab result: {o['detail'][:60]}",
+                              f"SYNTHETIC lab result for {o['detail']}. Demo values only, not real data. Reviewed status: pending doctor release.",
+                              o["id"], status="needs_release")
+        adapters.slack_dm(conn, o["provider_id"], f"Lab result ready for {o['patient_id']} ({o['detail'][:120]}), document *{doc['id']}*.\n"
+                                                   f"Reply `RELEASE {doc['id']}` to let the front desk share it with the patient.")
+        done.append(o["id"])
+    return done
 
 
 # ---------------------------------------------------------------- inventory
@@ -509,17 +635,32 @@ def sweep(conn) -> dict:
         if t < parse(a["starts_at"]) <= t + timedelta(hours=CONFIRM_WINDOW_HOURS):
             request_confirmation(conn, a["id"])
             out["confirmations_requested"].append(a["id"])
+    out["reminders"] = []
+    for a in rows(conn.execute("SELECT a.*, p.name FROM appointments a JOIN patients p ON p.id=a.patient_id WHERE a.status='confirmed'")):
+        if t < parse(a["starts_at"]) <= t + timedelta(hours=REMINDER_HOURS):
+            try:
+                propose(conn, None, "patient_template_message",
+                        {"patient_id": a["patient_id"], "ref": a["id"],
+                         "body": f"Reminder: your visit is {local(a['starts_at'])}. Please bring your insurance card. Reply RESCHEDULE if you can't make it."},
+                        f"Day-of reminder {a['id']}", dedupe_key=f"reminder:{a['id']}")
+                out["reminders"].append(a["id"])
+            except ClinicError:
+                pass
     for s in rows(conn.execute("SELECT * FROM appointments WHERE status='open' AND starts_at > ?", (iso(t),))):
         if not s["offered_to"] or _offer_expired(s):
             r = offer_slot_to_waitlist(conn, s["id"])
             if r.get("offered_to"):
                 out["offers"].append(r)
     for ac in rows(conn.execute("SELECT ac.*, p.name FROM aftercare ac JOIN patients p ON p.id=ac.patient_id WHERE ac.status='scheduled' AND ac.due_at <= ?", (iso(t),))):
-        propose(conn, None, "patient_template_message",
-                {"patient_id": ac["patient_id"], "body": f"Hi {ac['name'].split()[0]}, checking in from the clinic. {ac['question']}", "ref": ac["id"]},
-                f"Aftercare check-in {ac['id']}", dedupe_key=f"aftercare:{ac['id']}")
-        conn.execute("UPDATE aftercare SET status='sent' WHERE id=?", (ac["id"],))
+        try:
+            propose(conn, None, "patient_template_message",
+                    {"patient_id": ac["patient_id"], "body": f"Hi {ac['name'].split()[0]}, checking in from the clinic. {ac['question']}", "ref": ac["id"]},
+                    f"Aftercare check-in {ac['id']}", dedupe_key=f"aftercare:{ac['id']}")
+            conn.execute("UPDATE aftercare SET status='sent' WHERE id=?", (ac["id"],))
+        except ClinicError:
+            conn.execute("UPDATE aftercare SET status='call_needed' WHERE id=?", (ac["id"],))
         out["aftercare_sent"].append(ac["id"])
+    out["lab_results"] = lab_results_due(conn)
     out["low_stock"] = [i["sku"] for i in inventory_status(conn) if i["below_par"]]
     out["open_shifts"] = [s["id"] for s in staffing_overview(conn)["open_shifts"]]
     out["unrouted_orders"] = [o["id"] for o in list_orders(conn, "received")]

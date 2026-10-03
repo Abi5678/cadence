@@ -208,6 +208,41 @@ def route_order(order_id: str, task_id: str | None = None) -> dict:
     return clinic.route_order(_conn, order_id, task_id)
 
 
+@tool
+def find_patient(query: str) -> list:
+    """Look up patients by id or (part of) name. Doctors usually refer to patients by id, e.g. P-104."""
+    q = f"%{query.strip()}%"
+    return rows(_conn.execute("SELECT id,name,dob,plan_id FROM patients WHERE id LIKE ? OR name LIKE ? LIMIT 10", (q, q)))
+
+
+@tool
+def draft_doctor_order(doctor_slack_user: str, patient_id: str, kind: str, detail: str, task_id: str | None = None) -> dict:
+    """When a doctor asks in Slack for a prescription (kind=rx) or test/labwork (kind=lab), draft it here, one call per item,
+    copying their wording into detail. doctor_slack_user is the Slack member id (U...) of the doctor who asked.
+    The service then DMs the doctor asking them to reply CONFIRM <order id>; you cannot sign orders."""
+    return clinic.draft_doctor_order(_conn, doctor_slack_user, patient_id, kind, detail, task_id)
+
+
+# ---- documents & consent ----
+
+@tool
+def list_documents(patient_id: str | None = None) -> list:
+    """Patient documents (visit summaries, prescription copies, statements, lab results) and whether they were released/sent."""
+    return clinic.list_documents(_conn, patient_id)
+
+
+@tool
+def send_document(document_id: str, task_id: str | None = None) -> dict:
+    """Queue a released document to be sent to the patient's portal (needs receptionist approval and the patient's documents consent)."""
+    return clinic.send_document(_conn, document_id, task_id)
+
+
+@tool
+def consent_status(patient_id: str) -> list:
+    """The patient's communication consents (sms, documents). Consent can only be changed by the patient or front desk."""
+    return rows(_conn.execute("SELECT kind,granted,recorded_at,recorded_by FROM consents WHERE patient_id=?", (patient_id,)))
+
+
 # ---- inventory & staffing --------------------------------------------------
 
 @tool

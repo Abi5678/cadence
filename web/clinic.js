@@ -8,6 +8,7 @@
   const money = n => n == null ? '—' : `$${Number(n).toFixed(2)}`;
   const tone = s => ({ confirmed: 'good', completed: 'good', closed: 'good', transmitted: 'good', sent_to_lab: 'good', submitted: 'good', active: 'good', checked_in: 'iris',
     prepared: 'warn', requested: 'warn', offered: 'warn', pending_approval: 'warn', booked: 'warn', sent: 'warn', review: 'warn', running: 'iris', waiting: 'warn', open: 'iris',
+    awaiting_signature: 'warn', needs_release: 'warn', call_needed: 'bad', resulted: 'iris', released: 'good',
     rejected: 'bad', failed: 'bad', cancelled: 'bad', escalated: 'bad', inactive: 'bad', declined: 'bad' }[s] || '');
   const pill = s => `<span class="pill ${tone(s)}">${esc(String(s).replace(/_/g, ' '))}</span>`;
   let S = null, tab = location.hash.slice(1) || 'approvals', phonePatient = 'P-104';
@@ -27,7 +28,7 @@
     approvals() {
       const pending = S.approvals.filter(a => a.state === 'prepared');
       const done = S.approvals.filter(a => a.state !== 'prepared').slice(0, 25);
-      return `<h1>Approvals</h1><p class="lede">Everything that leaves the clinic waits here: pharmacy, lab, claims, vendor orders, free-text patient messages and shift changes.</p>
+      return `<h1>Approvals</h1><p class="lede">You are the check before anything leaves the clinic: pharmacy, lab, claims, vendor orders, free-text patient messages and shift changes.</p>
       <div class="grid"><section class="card"><h2>Waiting for you <small>${pending.length}</small></h2>
       ${pending.map(a => `<div class="approval"><div><div class="what">${esc(a.summary)}</div><div class="meta">${esc(a.action.replace(/_/g, ' '))} · ${tm(a.created_at)}${a.task_id ? ` · task ${esc(a.task_id)}` : ''}</div>
         ${a.payload.body ? `<pre>${esc(a.payload.body)}</pre>` : ''}</div>
@@ -58,14 +59,26 @@
       ${S.messages.filter(m => m.channel.startsWith('slack')).map(m => `<tr><td>${tm(m.created_at)}<br>${pill(m.channel === 'slack' ? 'slack' : 'preview')}</td><td>${esc(m.body)}</td></tr>`).join('') || '<tr><td colspan="2" class="empty">None yet</td></tr>'}</table></section></div>`;
     },
     orders() {
-      return `<h1>Orders, labs &amp; prescriptions</h1><p class="lede">Only provider-signed orders can be routed. Cadence queues them for approval, then sends to the (mock) lab or pharmacy and records the receipt.</p>
+      return `<h1>Orders, labs &amp; prescriptions</h1><p class="lede">Doctors prescribe and order tests in Slack by patient ID. Cadence drafts the order; it is signed only when the doctor replies <code>CONFIRM O-…</code>, which the service verifies against Slack. Signed orders wait for your approval, then go to the (mock) lab or pharmacy.</p>
       <div class="grid"><section class="card" style="grid-column:1/-1"><h2>Doctor orders</h2><table><tr><th>Order</th><th>Patient</th><th>Detail</th><th>Signed</th><th>Status</th></tr>
       ${S.orders.map(o => `<tr><td>${esc(o.id)}<br>${pill(o.kind)}</td><td>${esc(name(o.patient_id))}</td><td>${esc(o.detail)}</td><td>${o.signed_by ? esc(o.signed_by) : pill('unsigned')}</td><td>${pill(o.status)}</td></tr>`).join('')}</table></section>
       <section class="card"><h2>Simulate a signed doctor order</h2><form class="inline" id="order-form">
         <select name="kind"><option value="lab">Lab order</option><option value="rx">Prescription</option></select>
         <select name="patient_id">${S.patients.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select>
         <select name="provider_id"><option value="DR-CHEN">Dr. Chen</option><option value="DR-PATEL">Dr. Patel</option></select>
-        <input name="detail" required placeholder="e.g. Lipid panel, fasting" class="full"><button class="primary">Sign &amp; submit</button></form></section></div>`;
+        <input name="detail" required placeholder="e.g. Lipid panel, fasting" class="full"><button class="primary">Sign &amp; submit</button></form></section>
+      <section class="card"><h2>Doctor ⇄ Cadence in Slack</h2><ul class="feed">${S.messages.filter(m => m.channel.startsWith('slack')).map(m => `<li><time>${tm(m.created_at)}</time><div>${esc(m.body)}${m.channel === 'slack-preview' ? ' ' + pill('preview') : ''}</div></li>`).join('') || '<li class="empty">No Slack messages yet. DM the Cadence bot as the doctor.</li>'}</ul></section></div>`;
+    },
+    docs() {
+      const docs = S.documents, cons = S.consents;
+      const c = (pid, k) => (cons.find(x => x.patient_id === pid && x.kind === k) || {}).granted;
+      return `<h1>Documents &amp; consent</h1><p class="lede">Visit summaries, prescription copies, statements and doctor-released lab results go to the patient portal after you approve. Nothing is sent without the patient's consent.</p>
+      <div class="grid"><section class="card" style="grid-column:1/-1"><h2>Documents</h2><table><tr><th>Document</th><th>Patient</th><th>Created</th><th>Status</th><th></th></tr>
+      ${docs.map(d => `<tr><td>${esc(d.title)}<br><small>${esc(d.body.slice(0, 120))}</small></td><td>${esc(name(d.patient_id))}</td><td>${tm(d.created_at)}</td><td>${pill(d.status)}</td>
+        <td>${d.status === 'released' ? `<button class="mini" data-senddoc="${esc(d.id)}">Send to patient</button>` : d.status === 'needs_release' ? '<small>waiting for doctor RELEASE</small>' : ''}</td></tr>`).join('') || '<tr><td colspan="5" class="empty">No documents yet</td></tr>'}</table></section>
+      <section class="card"><h2>Patient consent</h2><table><tr><th>Patient</th><th>SMS reminders</th><th>Electronic documents</th></tr>
+      ${S.patients.map(p => `<tr><td>${esc(p.name)}<br><small>${esc(p.id)}</small></td>${['sms', 'documents'].map(k => `<td><label class="check-label"><input type="checkbox" data-consent="${esc(p.id)}" data-kind="${k}" ${c(p.id, k) ? 'checked' : ''}> ${c(p.id, k) ? 'yes' : 'no'}</label></td>`).join('')}</tr>`).join('')}</table>
+      <p class="footnote">Patients can text STOP to withdraw SMS consent at any time.</p></section></div>`;
     },
     frontdesk() {
       return `<h1>Front desk &amp; billing</h1><p class="lede">Check-in runs a payer eligibility check and posts the copay. Completing a visit drafts the claim for approval and schedules aftercare.</p>
@@ -128,6 +141,7 @@
     else if (d.reject) act(() => call(`/api/approvals/${d.reject}/decide`, { approve: false }), 'Rejected');
     else if (d.checkin) act(() => call(`/api/visits/${d.checkin}/checkin`, {}), 'Checked in, eligibility verified');
     else if (d.complete) act(() => call(`/api/visits/${d.complete}/complete`, {}), 'Visit completed, claim drafted');
+    else if (d.senddoc) act(() => call(`/api/documents/${d.senddoc}/send`, {}), 'Queued for approval');
     else if (d.phone) { phonePatient = d.phone; renderPhone(); }
     else if (d.reply) sendReply(d.reply);
     else if (b.id === 'sweep') act(() => call('/api/sweep', {}), 'Sweep finished');
@@ -140,6 +154,10 @@
     else if (f.id === 'task-form') act(() => call('/api/tasks', { title: v.title, brief: v.title }), 'Task assigned to Cadence');
     else if (f.id === 'phone-form') { const i = $('#phone-input'); if (i.value.trim()) { sendReply(i.value.trim()); i.value = ''; } }
     if (f.id !== 'phone-form') f.reset();
+  });
+  document.addEventListener('change', e => {
+    const c = e.target.closest('input[data-consent]'); if (!c) return;
+    act(() => call('/api/consents', { patient_id: c.dataset.consent, kind: c.dataset.kind, granted: c.checked }), 'Consent updated');
   });
   $('#phone-patient').addEventListener('change', e => { phonePatient = e.target.value; renderPhone(); });
   function sendReply(body) { act(() => call('/api/sim/patient-reply', { patient_id: phonePatient, body }), 'Reply sent, Cadence is on it'); }

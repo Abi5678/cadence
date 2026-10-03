@@ -157,5 +157,66 @@ class InventoryStaffing(unittest.TestCase):
         self.assertEqual(clinic.staffing_overview(conn)["open_shifts"], [])
 
 
+class DoctorSlackOrders(unittest.TestCase):
+    def setUp(self):
+        self.conn = fresh()
+        self.conn.execute("UPDATE providers SET slack_user='UDOC' WHERE id='DR-CHEN'")
+
+    def test_draft_is_unsigned_until_doctor_confirms(self):
+        from service import slack_sync
+        o = clinic.draft_doctor_order(self.conn, "UDOC", "P-104", "rx", "Amoxi-synth 500 mg BID x7d")
+        self.assertEqual(o["status"], "awaiting_signature")
+        self.assertIsNone(o["signed_by"])
+        with self.assertRaises(clinic.ClinicError):
+            clinic.route_order(self.conn, o["id"])  # agent cannot route an unsigned draft
+        cmds = slack_sync.parse_commands(f"confirm {o['id'].lower()} thanks")
+        self.assertEqual(cmds, [("CONFIRM", o["id"])])
+        slack_sync.apply_command(self.conn, "DR-CHEN", "CONFIRM", o["id"], "1700000000.0001")
+        o2 = db.one(self.conn.execute("SELECT * FROM orders WHERE id=?", (o["id"],)))
+        self.assertEqual((o2["status"], o2["signed_by"], o2["signature_ref"]), ("pending_approval", "DR-CHEN", "1700000000.0001"))
+
+    def test_other_provider_cannot_sign(self):
+        o = clinic.draft_doctor_order(self.conn, "UDOC", "P-104", "lab", "Lipid panel")
+        clinic.sign_order(self.conn, o["id"], "DR-PATEL", "x")
+        self.assertEqual(db.one(self.conn.execute("SELECT status FROM orders WHERE id=?", (o["id"],)))["status"], "awaiting_signature")
+
+    def test_unknown_slack_user_rejected(self):
+        with self.assertRaises(clinic.ClinicError):
+            clinic.draft_doctor_order(self.conn, "UNOBODY", "P-104", "lab", "CBC")
+
+    def test_lab_result_needs_release_before_sending(self):
+        r = clinic.route_order(self.conn, "O-301")
+        clinic.decide(self.conn, r["approval_id"], True, "receptionist")
+        self.conn.execute("UPDATE orders SET result_due_at='2000-01-01T00:00:00+00:00' WHERE id='O-301'")
+        self.assertEqual(clinic.lab_results_due(self.conn), ["O-301"])
+        doc = [d for d in clinic.list_documents(self.conn, "P-104") if d["kind"] == "lab_result"][0]
+        with self.assertRaises(clinic.ClinicError):
+            clinic.send_document(self.conn, doc["id"])
+        clinic.release_document(self.conn, doc["id"], "DR-CHEN")
+        ap = clinic.send_document(self.conn, doc["id"])
+        clinic.decide(self.conn, ap["id"], True, "receptionist")
+        self.assertEqual(db.one(self.conn.execute("SELECT status FROM documents WHERE id=?", (doc["id"],)))["status"], "sent")
+
+
+class Consent(unittest.TestCase):
+    def test_documents_blocked_without_consent(self):
+        conn = fresh()
+        d = clinic.create_document(conn, "P-105", "statement", "Statement", "x")
+        with self.assertRaises(clinic.ClinicError):
+            clinic.send_document(conn, d["id"])
+
+    def test_stop_withdraws_sms_and_confirmation_falls_back_to_call(self):
+        conn = fresh()
+        clinic.record_patient_reply(conn, "P-103", "STOP")
+        self.assertFalse(clinic.has_consent(conn, "P-103", "sms"))
+        self.assertEqual(clinic.request_confirmation(conn, "A-203")["confirmation"], "call_needed")
+
+    def test_rx_transmit_creates_patient_copy(self):
+        conn = fresh()
+        r = clinic.route_order(conn, "O-302")
+        clinic.decide(conn, r["approval_id"], True, "receptionist")
+        self.assertTrue(any(d["kind"] == "rx_copy" for d in clinic.list_documents(conn, "P-104")))
+
+
 if __name__ == "__main__":
     unittest.main()

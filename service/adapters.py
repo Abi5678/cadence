@@ -7,8 +7,11 @@ the provider's Slack user are configured; otherwise they are recorded locally.
 from __future__ import annotations
 
 import os
+from datetime import timedelta
 
-from .db import iso, new_id, now, one
+from .db import emit, iso, new_id, now, one
+
+LAB_RESULT_MINUTES = float(os.environ.get("CADENCE_LAB_RESULT_MINUTES", "2"))
 
 
 def _receipt(prefix: str) -> str:
@@ -36,20 +39,67 @@ def transmit_rx(conn, p: dict) -> str:
     if not o or o["kind"] != "rx" or not o["signed_by"]:
         raise RuntimeError("only signed prescriptions can be transmitted")
     conn.execute("UPDATE orders SET status='transmitted' WHERE id=?", (o["id"],))
-    return _receipt("ERX")
+    rid = _receipt("ERX")
+    _doc(conn, o["patient_id"], "rx_copy", f"Prescription sent to pharmacy: {o['detail'][:50]}",
+         f"Your prescription ({o['detail']}) was sent to Synthetic Pharmacy, Main St. Confirmation {rid}.", o["id"])
+    slack_dm(conn, o["provider_id"], f"Prescription {o['id']} for {o['patient_id']} transmitted to pharmacy (receipt {rid}).")
+    return rid
 
 
 def send_lab_order(conn, p: dict) -> str:
     o = one(conn.execute("SELECT * FROM orders WHERE id=?", (p["order_id"],)))
     if not o or o["kind"] != "lab" or not o["signed_by"]:
         raise RuntimeError("only signed lab orders can be sent")
-    conn.execute("UPDATE orders SET status='sent_to_lab' WHERE id=?", (o["id"],))
-    return _receipt("LAB")
+    due = iso(now() + timedelta(minutes=LAB_RESULT_MINUTES))
+    conn.execute("UPDATE orders SET status='sent_to_lab', result_due_at=? WHERE id=?", (due, o["id"]))
+    rid = _receipt("LAB")
+    slack_dm(conn, o["provider_id"], f"Lab order {o['id']} for {o['patient_id']} sent to the lab (receipt {rid}).")
+    return rid
 
 
 def submit_claim(conn, p: dict) -> str:
     conn.execute("UPDATE charges SET status='submitted' WHERE id=?", (p["charge_id"],))
-    return _receipt("CLM")
+    ch = one(conn.execute("SELECT * FROM charges WHERE id=?", (p["charge_id"],)))
+    rid = _receipt("CLM")
+    owed = one(conn.execute("SELECT COALESCE(SUM(patient_responsibility),0) AS t FROM charges WHERE appointment_id=?", (ch["appointment_id"],)))["t"]
+    _doc(conn, ch["patient_id"], "statement", "Billing statement",
+         f"Claim {rid} submitted to your insurer for visit {ch['appointment_id']}. Your responsibility so far: ${owed:.2f}.", ch["appointment_id"])
+    return rid
+
+
+def send_document(conn, p: dict) -> str:
+    d = one(conn.execute("SELECT * FROM documents WHERE id=?", (p["document_id"],)))
+    if not d or d["status"] == "needs_release":
+        raise RuntimeError("document is not released")
+    conn.execute("UPDATE documents SET status='sent' WHERE id=?", (d["id"],))
+    _msg(conn, "sms", d["patient_id"], f"New document in your patient portal: {d['title']}. (secure link, synthetic)", d["id"])
+    return _receipt("DOC")
+
+
+def _doc(conn, patient_id: str, kind: str, title: str, body: str, ref: str) -> None:
+    did = new_id("D")
+    conn.execute("INSERT INTO documents (id,patient_id,kind,title,body,status,ref,created_at) VALUES (?,?,?,?,?,?,?,?)",
+                 (did, patient_id, kind, title, body, "released", ref, iso(now())))
+    emit(conn, None, "document.created", "service", f"{title} for {patient_id}", {"document_id": did})
+
+
+def slack_dm(conn, provider_id: str, text: str) -> str | None:
+    """DM a provider from the Cadence bot. Falls back to a local preview when Slack isn't configured."""
+    prov = one(conn.execute("SELECT * FROM providers WHERE id=?", (provider_id,))) or {}
+    slack_user = prov.get("slack_user")
+    token = os.environ.get("SLACK_BOT_TOKEN")
+    if token and slack_user:
+        try:
+            from slack_sdk import WebClient  # imported lazily so tests run without Slack
+            r = WebClient(token=token, timeout=10).chat_postMessage(channel=slack_user, text=text)
+            _msg(conn, "slack", provider_id, text, r.get("ts"))
+            # Remember the DM channel so slack_sync can read the doctor's replies (no im:write scope needed).
+            conn.execute("INSERT OR REPLACE INTO kv VALUES (?,?)", (f"slack_dm_channel:{provider_id}", r.get("channel")))
+            return r.get("ts")
+        except Exception as e:  # noqa: BLE001 - Slack outage must not block clinic work
+            emit(conn, None, "slack.error", "service", f"Slack DM failed: {e}"[:300])
+    _msg(conn, "slack-preview", provider_id, text)
+    return None
 
 
 def vendor_order(conn, p: dict) -> str:
@@ -67,17 +117,9 @@ def fill_shift(conn, p: dict) -> str:
 
 
 def escalate_to_doctor(conn, p: dict) -> str:
-    prov = one(conn.execute("SELECT * FROM providers WHERE id=?", (p["provider_id"],))) or {}
     text = f":rotating_light: Cadence escalation for patient {p['patient_id']}\n{p['summary']}\n(Routing only. No clinical assessment was made.)"
-    slack_user = prov.get("slack_user") or os.environ.get("CADENCE_DOCTOR_SLACK_USER")
-    token = os.environ.get("SLACK_BOT_TOKEN")
-    if token and slack_user:
-        from slack_sdk import WebClient  # imported lazily so tests run without Slack
-        r = WebClient(token=token).chat_postMessage(channel=slack_user, text=text)
-        _msg(conn, "slack", p["provider_id"], text, r.get("ts"))
-        return f"SLACK-{r.get('ts')}"
-    _msg(conn, "slack-preview", p["provider_id"], text)
-    return _receipt("ESC")
+    ts = slack_dm(conn, p["provider_id"], text)
+    return f"SLACK-{ts}" if ts else _receipt("ESC")
 
 
 def payer_eligibility(conn, patient: dict) -> dict:
@@ -100,4 +142,5 @@ EXECUTORS = {
     "vendor_order": vendor_order,
     "fill_shift": fill_shift,
     "escalate_to_doctor": escalate_to_doctor,
+    "send_document": send_document,
 }

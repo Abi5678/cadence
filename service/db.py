@@ -58,8 +58,19 @@ CREATE TABLE IF NOT EXISTS charges (
 CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY, kind TEXT NOT NULL,           -- lab|rx
   patient_id TEXT, provider_id TEXT, detail TEXT NOT NULL,
-  signed_by TEXT, signed_at TEXT, status TEXT DEFAULT 'received', created_at TEXT, source TEXT
+  signed_by TEXT, signed_at TEXT, status TEXT DEFAULT 'received', created_at TEXT, source TEXT,
+  signature_ref TEXT, result_due_at TEXT   -- signature_ref: Slack ts of the doctor's CONFIRM message
 );
+CREATE TABLE IF NOT EXISTS documents (
+  id TEXT PRIMARY KEY, patient_id TEXT, kind TEXT, title TEXT, body TEXT,
+  status TEXT DEFAULT 'released',   -- needs_release|released|sent
+  ref TEXT, released_by TEXT, created_at TEXT
+);
+CREATE TABLE IF NOT EXISTS consents (
+  patient_id TEXT, kind TEXT, granted INTEGER, recorded_at TEXT, recorded_by TEXT,
+  PRIMARY KEY (patient_id, kind)     -- kind: sms|documents
+);
+CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS inventory (
   sku TEXT PRIMARY KEY, name TEXT, on_hand INTEGER, par INTEGER, reorder_qty INTEGER, vendor TEXT, unit_cost REAL
 );
@@ -154,7 +165,7 @@ def seed(conn: sqlite3.Connection, base: datetime | None = None) -> None:
         ("P-107", "Taylor Placeholder", "1984-12-01", "+1-555-0107", "PLN-A", "SM-34001"),
     ])
     ins("INSERT INTO providers VALUES (?,?,?,?)", [
-        ("DR-CHEN", "Dr. Chen", "physician", None),
+        ("DR-CHEN", "Dr. Chen", "physician", os.environ.get("CADENCE_DOCTOR_SLACK_USER")),
         ("DR-PATEL", "Dr. Patel", "physician", None),
     ])
     ins("INSERT INTO staff VALUES (?,?,?,?)", [
@@ -196,6 +207,14 @@ def seed(conn: sqlite3.Connection, base: datetime | None = None) -> None:
         ("SYR-3", "3 mL syringes, box", 35, 25, 50, "Synthetic Supply Co", 12.0),
         ("FLU-VAX", "Influenza vaccine, dose", 4, 15, 30, "Demo Biologics", 18.0),
         ("GAUZE", "Gauze pads 4x4, pack", 50, 30, 60, "Synthetic Supply Co", 3.2),
+    ])
+    consents = []
+    for pid in ("P-101", "P-102", "P-103", "P-104", "P-106", "P-107"):
+        consents += [(pid, "sms", 1, iso(base - timedelta(days=30)), "kiosk"), (pid, "documents", 1, iso(base - timedelta(days=30)), "kiosk")]
+    consents += [("P-105", "sms", 1, iso(base), "kiosk"), ("P-105", "documents", 0, iso(base), "kiosk")]
+    ins("INSERT INTO consents VALUES (?,?,?,?,?)", consents)
+    ins("INSERT INTO documents (id,patient_id,kind,title,body,status,ref,created_at) VALUES (?,?,?,?,?,?,?,?)", [
+        ("D-1", "P-106", "visit_summary", "Visit summary: minor procedure", "Administrative visit summary (synthetic): procedure visit with Dr. Chen, aftercare check-in scheduled.", "released", "A-206", iso(base - timedelta(days=2))),
     ])
     ins("INSERT INTO orders (id,kind,patient_id,provider_id,detail,signed_by,signed_at,status,created_at,source) VALUES (?,?,?,?,?,?,?,?,?,?)", [
         ("O-301", "lab", "P-104", "DR-CHEN", "CBC and basic metabolic panel", "DR-CHEN", iso(base - timedelta(hours=1)), "received", iso(base), "seed"),

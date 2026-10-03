@@ -19,6 +19,7 @@ def run_sweep(conn, runner) -> dict:
         out = clinic.sweep(conn)
         new = []
         jobs = [
+            ("documents", out["lab_results"], "Lab results arrived", "Lab results came back for orders {}. The doctor was asked in Slack to RELEASE them; post a short note for the front desk."),
             ("orders", out["unrouted_orders"], "Route doctor orders", "Route these new doctor orders (signed ones to approval; ask for signatures on unsigned): {}"),
             ("inventory", out["low_stock"], "Restock low inventory", "These SKUs are below par; draft reorders: {}"),
             ("staffing", out["open_shifts"], "Fill open shifts", "These shifts have no one assigned; pick eligible staff and propose fills: {}"),
@@ -48,6 +49,17 @@ def on_event(conn, runner):
                                    dedupe_key=f"reply:{ev['data']['message_id']}")
             runner.wake(t["id"])
     return handle
+
+
+async def slack_loop(conn) -> None:
+    """Doctor CONFIRM/RELEASE/CANCEL replies, verified against Slack every few seconds."""
+    from . import slack_sync
+    while True:
+        try:
+            await asyncio.to_thread(slack_sync.sync, conn, mcp_tools.LOCK)
+        except Exception:  # noqa: BLE001 - Slack hiccups must not stop the clinic loop
+            log.exception("slack sync failed")
+        await asyncio.sleep(int(os.environ.get("CADENCE_SLACK_POLL_SECONDS", "8")))
 
 
 async def loop(conn, runner) -> None:

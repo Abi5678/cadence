@@ -51,6 +51,7 @@ api = FastAPI(title="Cadence")
 async def _start() -> None:
     runner.start()
     asyncio.create_task(scheduler.loop(conn, runner))
+    asyncio.create_task(scheduler.slack_loop(conn))
 
 
 def locked(fn, *a, **kw):
@@ -85,6 +86,9 @@ def state():
             "orders": clinic.list_orders(conn),
             "charges": clinic.billing_summary(conn),
             "patients": q("SELECT id,name,plan_id FROM patients"),
+            "documents": clinic.list_documents(conn),
+            "consents": q("SELECT * FROM consents ORDER BY patient_id, kind"),
+            "providers": q("SELECT id,name,role,slack_user IS NOT NULL AS on_slack FROM providers"),
             "agent_backend": agent.backend(),
         }
 
@@ -176,6 +180,22 @@ def doctor_order(body: DoctorOrder):
     o = locked(clinic.record_signed_order, conn, body.kind, body.patient_id, body.provider_id, body.detail, "ui-sim")
     scheduler.run_sweep(conn, runner)
     return o
+
+
+class Consent(BaseModel):
+    patient_id: str
+    kind: str
+    granted: bool
+
+
+@api.post("/api/consents")
+def consent(body: Consent):
+    return locked(clinic.set_consent, conn, body.patient_id, body.kind, body.granted, "front_desk")
+
+
+@api.post("/api/documents/{doc_id}/send")
+def send_doc(doc_id: str):
+    return locked(clinic.send_document, conn, doc_id)
 
 
 @api.post("/api/visits/{appt_id}/checkin")
