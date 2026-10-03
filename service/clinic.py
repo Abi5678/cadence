@@ -318,9 +318,13 @@ def record_patient_reply(conn, patient_id: str, body: str) -> dict:
 
 
 def patient_context(conn, patient_id: str) -> dict:
-    p = one(conn.execute("SELECT id,name,phone,plan_id FROM patients WHERE id=?", (patient_id,)))
+    p = one(conn.execute("SELECT p.id, p.name, p.dob, p.phone, p.plan_id, p.member_id, p.preferred_pharmacy, "
+                         "i.payer AS insurance_payer, i.name AS insurance_plan FROM patients p "
+                         "LEFT JOIN insurance_plans i ON i.id=p.plan_id WHERE p.id=?", (patient_id,)))
     if not p:
         raise ClinicError(f"unknown patient {patient_id}")
+    p["chronic_conditions"] = [c["description"] for c in rows(conn.execute(
+        "SELECT description FROM conditions WHERE patient_id=? AND chronic=1", (patient_id,)))]
     p["appointments"] = rows(conn.execute("SELECT id,starts_at,status,confirmation,reason FROM appointments WHERE patient_id=? ORDER BY starts_at", (patient_id,)))
     p["open_offers"] = rows(conn.execute("SELECT id,starts_at,offer_expires_at FROM appointments WHERE offered_to=? AND status='open'", (patient_id,)))
     p["aftercare"] = rows(conn.execute("SELECT id,question,status FROM aftercare WHERE patient_id=? AND status IN ('sent','answered')", (patient_id,)))
@@ -486,6 +490,13 @@ def route_order(conn, order_id: str, task_id: str | None = None) -> dict:
     payload = {"order_id": order_id}
     if o["kind"] == "rx":
         from . import demo_story
+        elig = verify_insurance(conn, o["patient_id"])
+        if elig["status"] != "active":
+            conn.execute("UPDATE orders SET status='coverage_review' WHERE id=?", (order_id,))
+            adapters.slack_dm(conn, o["provider_id"], f"{order_id} not sent: {o['patient_id']}'s insurance is not active "
+                                                      f"({elig.get('reason', 'inactive')}). The front desk will collect updated coverage.")
+            return {"order_id": order_id, "eligibility": elig, "transmitted": False}
+        payload["eligibility"] = {k: elig.get(k) for k in ("payer", "plan", "member_id", "reference")}
         cov = demo_story.apply_rx_coverage(conn, o, task_id)
         if not cov["coverage"]["covered"]:
             return cov
@@ -496,6 +507,11 @@ def route_order(conn, order_id: str, task_id: str | None = None) -> dict:
     ap = propose(conn, task_id, action, payload, f"Send {o['kind']} order {order_id} to {dest}: {o['detail'][:60]}",
                  dedupe_key=f"route:{order_id}")
     conn.execute("UPDATE orders SET status='pending_approval' WHERE id=?", (order_id,))
+    if (o["kind"] == "rx" and o.get("signature_ref") and ap["state"] == "prepared"
+            and os.environ.get("CADENCE_SEND_PRESCRIBER_SIGNED_RX") == "1"):
+        # Clinic policy (opt-in): the prescriber's own verified signature authorizes sending a covered Rx to the
+        # patient's pharmacy; no second human approval. Uncovered or uninsured Rx stopped above.
+        ap = decide(conn, ap["id"], True, "policy:prescriber-signed")
     return {"order_id": order_id, "approval_id": ap["id"], "state": ap["state"]}
 
 
@@ -528,10 +544,15 @@ def send_document(conn, document_id: str, task_id: str | None = None) -> dict:
 # ---------------------------------------------------------------- doctor orders via Slack
 
 def provider_by_slack(conn, slack_user: str) -> dict:
-    p = one(conn.execute("SELECT * FROM providers WHERE slack_user=?", (slack_user,)))
-    if not p:
-        raise ClinicError(f"Slack user {slack_user} is not a registered provider")
-    return p
+    p = one(conn.execute("SELECT * FROM providers WHERE slack_user=? OR id=? OR lower(name)=lower(?)", (slack_user, slack_user, slack_user or "")))
+    if p:
+        return p
+    # The Slack bridge only admits allow-listed doctors, but the agent sees display names, not member ids.
+    # With exactly one Slack-linked doctor, drafts default to them. Signing still needs that doctor's own CONFIRM.
+    linked = rows(conn.execute("SELECT * FROM providers WHERE slack_user IS NOT NULL"))
+    if len(linked) == 1:
+        return linked[0]
+    raise ClinicError(f"Slack user {slack_user} is not a registered provider")
 
 
 def _open_doctor_order_task(conn, provider_id: str, patient_id: str) -> dict | None:

@@ -452,6 +452,16 @@ def demo_anomaly(body: DemoAnomaly):
             raise HTTPException(404, str(e)) from e
 
 
+class Quiet(BaseModel):
+    on: bool = True
+
+
+@api.post("/api/demo/quiet")
+def demo_quiet(body: Quiet):
+    """Recording mode on/off: pauses random device anomalies (and their Slack alerts)."""
+    return devices.set_quiet(body.on)
+
+
 @api.post("/api/demo/outage")
 def demo_outage():
     """Director backup for scene 1 if Slack hiccups: the same handler the doctor's Slack message runs."""

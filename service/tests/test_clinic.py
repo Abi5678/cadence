@@ -190,7 +190,13 @@ class DoctorSlackOrders(unittest.TestCase):
         clinic.sign_order(self.conn, o["id"], "DR-PATEL", "x")
         self.assertEqual(db.one(self.conn.execute("SELECT status FROM orders WHERE id=?", (o["id"],)))["status"], "awaiting_signature")
 
+    def test_single_linked_doctor_is_the_default(self):
+        o = clinic.draft_doctor_order(self.conn, "Darsana Thulasi", "P-104", "lab", "CBC")
+        self.assertEqual(o["provider_id"], "DR-CHEN")
+        self.assertIsNone(o["signed_by"])  # still needs that doctor's own CONFIRM
+
     def test_unknown_slack_user_rejected(self):
+        self.conn.execute("UPDATE providers SET slack_user='UOTHER' WHERE id='DR-PATEL'")  # two linked doctors: no default
         with self.assertRaises(clinic.ClinicError):
             clinic.draft_doctor_order(self.conn, "UNOBODY", "P-104", "lab", "CBC")
 

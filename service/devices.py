@@ -17,7 +17,13 @@ TICK_SECONDS = float(os.environ.get("CADENCE_DEVICE_TICK", "6"))
 ANOMALY_RATE = float(os.environ.get("CADENCE_ANOMALY_RATE", "0.002"))  # ~1 anomaly every few minutes at 1x
 ABNORMAL = {"glucose": lambda r: r.choice([52, 61, 288, 312]), "systolic_bp": lambda r: r.choice([171, 184, 86]),
             "spo2": lambda r: r.choice([87, 89, 90]), "weight_kg": lambda r: None}
-STATE = {"speed": 1.0, "readings": 0, "anomalies": 0, "until": None}
+STATE = {"speed": 1.0, "readings": 0, "anomalies": 0, "until": None, "quiet": False}
+
+
+def set_quiet(on: bool) -> dict:
+    """Recording mode: no random out-of-range readings (so the doctor's Slack stays clean); 'A' still triggers one on cue."""
+    STATE["quiet"] = bool(on)
+    return {"quiet": STATE["quiet"]}
 _rng = random.Random()
 
 
@@ -53,7 +59,7 @@ def tick(conn, runner) -> list[dict]:
     for d in devices:
         if _rng.random() > 0.35:  # not every device reports every tick
             continue
-        abnormal = _rng.random() < ANOMALY_RATE * STATE["speed"] ** 0.5
+        abnormal = not STATE["quiet"] and _rng.random() < ANOMALY_RATE * STATE["speed"] ** 0.5
         val = ABNORMAL[d["metric"]](_rng) if abnormal else None
         if val is None:
             abnormal, val = False, ccm.normal_value(d["metric"], _rng)

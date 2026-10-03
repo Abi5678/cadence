@@ -15,3 +15,4 @@ Ready. Open on the demo laptop:
   Mission control:       http://localhost:8090/web/mission.html   (press ? for director keys)
 Doctor (Darsana): Slack -> Apps -> Cadence -> Messages.
 TXT
+curl -fs -X POST localhost:8090/api/demo/quiet -H 'content-type: application/json' -d '{"on":true}' >/dev/null && echo "Recording mode: random alerts paused (press A in mission control for one on cue)."

@@ -483,9 +483,21 @@ STORY_PATIENTS = [  # (id, name, offset hours from tomorrow 10:00 clinic time, p
 PATEL_OPEN = [0.5, 1.0, 1.5, 3.0, 3.5, 4.0, 5.0, 5.5, 6.0]  # Dr. Patel openings, hours from tomorrow 10:00
 
 
+def seed_rx_patient(conn) -> None:
+    """Doctor-in-Slack prescription demo: a synthetic patient with a preferred pharmacy and active coverage."""
+    if one(conn.execute("SELECT id FROM patients WHERE id='P-120'")):
+        return
+    conn.execute("INSERT INTO patients (id,name,dob,phone,plan_id,member_id,preferred_pharmacy) VALUES (?,?,?,?,?,?,?)",
+                 ("P-120", "Fatima Aguilar", "1994-03-14", "+1-555-0120", "PLN-A", "SM-55120", "CVS Pharmacy, Worcester Road"))
+    for kind in ("sms", "documents"):
+        conn.execute("INSERT OR IGNORE INTO consents VALUES (?,?,?,?,?)", ("P-120", kind, 1, iso(now() - timedelta(days=60)), "kiosk"))
+    conn.execute("INSERT INTO conditions VALUES (?,?,?,?,?)", ("P-120", "E11.9", "Type 2 diabetes", 1, "2024-01-01"))
+
+
 def seed_story(conn, base=None) -> dict:
     """Dr. Chen's full day tomorrow (Bob first) and Dr. Patel's openings, so the outage story plays end to end.
     Live service only (tests build their own data). Idempotent."""
+    seed_rx_patient(conn)
     if one(conn.execute("SELECT id FROM patients WHERE id='P-108'")):
         return {"seeded": False}
     base = (base or now()).replace(minute=0, second=0, microsecond=0)

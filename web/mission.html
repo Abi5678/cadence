@@ -102,7 +102,7 @@ section h2 em{font-style:normal;color:var(--text);text-transform:none;letter-spa
     <section style="min-height:0"><h2>Live agent activity</h2><ul class="river" id="river"></ul></section>
   </div>
 </main>
-<div id="keys" class="keys" hidden><b>Director keys</b> (invisible on video)<br>A · out-of-range reading (P-205) &nbsp; Shift+A · any patient<br>C · patient P-101 texts a cancellation<br>M · month-end CCM close<br>N · night shift (20&times; for 2 min, then replay)<br>R · replay last hour &nbsp; Esc · close replay &nbsp; ? · this help</div>
+<div id="keys" class="keys" hidden><b>Director keys</b> (invisible on video)<br>A · out-of-range reading (P-205) &nbsp; Shift+A · any patient<br>C · patient P-101 texts a cancellation<br>M · month-end CCM close<br>N · night shift (20&times; for 2 min, then replay)<br>Q · recording mode (pause random alerts) &nbsp; R · replay last hour &nbsp; Esc · close replay &nbsp; ? · this help</div>
 <div id="replay" role="dialog" aria-label="Night shift replay"><button class="close" id="replay-close">Close</button><h2>While you were away</h2><div id="replay-meta" style="color:var(--muted)"></div><pre id="replay-summary">Summarizing on the GB10…</pre><ul id="replay-events"></ul></div>
 <script>
 (() => {
@@ -186,6 +186,7 @@ section h2 em{font-style:normal;color:var(--text);text-transform:none;letter-spa
     else if (k === 'm') $('#close').click();
     else if (k === 'n') $('#night').click();
     else if (k === 'r') $('#replay-btn').click();
+    else if (k === 'q') { window.__quiet = !window.__quiet; post('/api/demo/quiet', {on: window.__quiet}); }
   });
   function connect() { const es = new EventSource('/api/events'); es.onmessage = m => { try { river(JSON.parse(m.data)); } catch {} }; es.onerror = () => { es.close(); setTimeout(connect, 3000); }; }
   setInterval(() => $('#clock').textContent = new Date().toLocaleTimeString(), 1000);

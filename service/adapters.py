@@ -48,7 +48,11 @@ def transmit_rx(conn, p: dict) -> str:
                     "Eligibility is not a payment guarantee.")
     _doc(conn, o["patient_id"], "rx_copy", f"Prescription sent to pharmacy: {o['detail'][:50]}",
          f"Prescription sent to {pharmacy}. Confirmation {rid}.{cov_line} Medication text unchanged.", o["id"])
-    slack_dm(conn, o["provider_id"], f"Prescription {o['id']} transmitted to the patient's pharmacy (receipt {rid}).")
+    el = p.get("eligibility") or {}
+    ins = (f"Insurance linked: {el.get('payer')} {el.get('plan')} (member {el.get('member_id')}), active. " if el else "")
+    covtxt = f"Covered, tier {cov.get('tier')}, est. copay ${cov.get('estimated_copay')}. " if cov else ""
+    slack_dm(conn, o["provider_id"], f"Done. {ins}{covtxt}{o['detail']} for {o['patient_id']} sent to {pharmacy} "
+                                     f"(mock e-prescribing, receipt {rid}). Medication text unchanged.")
     return rid
 
 

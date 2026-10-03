@@ -99,3 +99,41 @@ class VoiceClipFromSlack(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PrescriberSignedRx(unittest.TestCase):
+    def test_confirm_checks_insurance_and_sends_to_preferred_pharmacy(self):
+        from service import demo_story
+        conn = fresh()
+        demo_story.seed_rx_patient(conn)
+        ctx = clinic.patient_context(conn, "P-120")
+        self.assertEqual(ctx["preferred_pharmacy"], "CVS Pharmacy, Worcester Road")
+        self.assertEqual(ctx["insurance_payer"], "Synthetic Mutual")
+        o = clinic.draft_doctor_order(conn, DOC, "P-120", "rx", "Metformin 500 mg twice daily")
+        fake = FakeSlack([{"ts": "101.0", "user": DOC, "text": f"CONFIRM {o['id']}"}])
+        with mock.patch.dict(os.environ, {"SLACK_BOT_TOKEN": "xoxb-test", "CADENCE_SEND_PRESCRIBER_SIGNED_RX": "1"}), \
+                mock.patch.object(slack_sync, "_client", return_value=fake), \
+                mock.patch("slack_sdk.WebClient") as wc:
+            wc.return_value.chat_postMessage.return_value = {"ts": "1", "channel": CH}
+            slack_sync.sync(conn, __import__("threading").RLock())
+            dm = " ".join(c.kwargs.get("text", "") for c in wc.return_value.chat_postMessage.call_args_list)
+        self.assertEqual(db.one(conn.execute("SELECT status FROM orders WHERE id=?", (o["id"],)))["status"], "transmitted")
+        self.assertIn("CVS Pharmacy, Worcester Road", dm)
+        self.assertIn("Insurance linked: Synthetic Mutual", dm)
+        self.assertIn("Metformin 500 mg twice daily", dm)
+
+    def test_without_policy_signed_rx_still_waits_for_approval(self):
+        from service import demo_story
+        conn = fresh()
+        demo_story.seed_rx_patient(conn)
+        o = clinic.draft_doctor_order(conn, DOC, "P-120", "rx", "Metformin 500 mg twice daily")
+        with mock.patch.dict(os.environ, {"CADENCE_SEND_PRESCRIBER_SIGNED_RX": "0"}):
+            clinic.sign_order(conn, o["id"], "DR-CHEN", "102.0")
+        self.assertEqual(db.one(conn.execute("SELECT status FROM orders WHERE id=?", (o["id"],)))["status"], "pending_approval")
+
+    def test_inactive_insurance_is_not_sent(self):
+        conn = fresh()
+        o = clinic.draft_doctor_order(conn, DOC, "P-105", "rx", "Metformin 500 mg twice daily")  # P-105 coverage terminated
+        with mock.patch.dict(os.environ, {"CADENCE_SEND_PRESCRIBER_SIGNED_RX": "1"}):
+            clinic.sign_order(conn, o["id"], "DR-CHEN", "103.0")
+        self.assertEqual(db.one(conn.execute("SELECT status FROM orders WHERE id=?", (o["id"],)))["status"], "coverage_review")
