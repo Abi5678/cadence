@@ -15,7 +15,10 @@ printf 'Slack bot token (xoxb-, hidden): ' >&2; IFS= read -r -s SLACK_BOT_TOKEN;
 printf 'Slack app token (xapp-, hidden): ' >&2; IFS= read -r -s SLACK_APP_TOKEN; printf '\n' >&2
 printf 'Slack member IDs allowed (comma-separated): ' >&2; IFS= read -r SLACK_ALLOWED_USERS
 export SLACK_BOT_TOKEN SLACK_APP_TOKEN SLACK_ALLOWED_USERS
-(cd ~/src/NemoClaw && bash install.sh --non-interactive --yes-i-accept-third-party-software) || nemohermes onboard --resume
+if ! (cd ~/src/NemoClaw && bash install.sh --non-interactive --yes-i-accept-third-party-software); then
+  if command -v nemohermes >/dev/null; then nemohermes onboard --resume
+  else echo "NemoHermes install failed before the CLI was installed. Do not Ctrl+C during 'Installing dependencies'; rerun this script." >&2; exit 1; fi
+fi
 unset SLACK_APP_TOKEN
 nemohermes cadence status
 # Cadence service env file (outside git): Slack bot token for doctor escalations + Hermes API token
