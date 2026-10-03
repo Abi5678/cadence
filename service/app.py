@@ -269,7 +269,10 @@ def ccm_state():
 
 
 @api.post("/api/ccm/close")
-def ccm_close():
+def ccm_close(direct: bool = False):
+    if direct:  # demo prep: build last month's packets now, without waiting for an agent turn
+        with mcp_tools.LOCK:
+            return ccm.month_end_close(conn)
     t = locked(clinic.create_task, conn, "ccm", f"Month-end CCM/RPM close for {ccm.prev_month()}",
                f"Run ccm_month_end_close for {ccm.prev_month()}, then post a short summary: packets ready for review, total, and the main gaps.")
     runner.wake(t["id"])

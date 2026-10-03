@@ -222,8 +222,9 @@ def find_patient(query: str) -> list:
 
 @tool
 def draft_doctor_order(doctor_slack_user: str, patient_id: str, kind: str, detail: str, task_id: str | None = None) -> dict:
-    """When a doctor asks in Slack for a prescription (kind=rx) or test/labwork (kind=lab), draft it here, one call per item,
-    copying their wording into detail. doctor_slack_user is the Slack member id (U...) of the doctor who asked.
+    """When a doctor asks in Slack for a prescription (kind=rx) or test/labwork (kind=lab), draft it here, one call per item.
+    detail = the doctor's words VERBATIM: never correct, expand, translate or substitute a drug or test name, dose or frequency
+    (e.g. keep "Amoxi-synth 500 mg twice daily for 7 days" exactly). doctor_slack_user is the Slack member id (U...) of the doctor who asked.
     The service then DMs the doctor asking them to reply CONFIRM <order id>; you cannot sign orders."""
     return clinic.draft_doctor_order(_conn, doctor_slack_user, patient_id, kind, detail, task_id)
 
