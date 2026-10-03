@@ -41,8 +41,12 @@ try{const history=messages.slice(0,-1).slice(-8).map(m=>({role:m.role==='user'?'
 const r=await fetch('/api/chat',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({message:text,history})})
 if(!r.ok)throw new Error((await r.json().catch(()=>({}))).detail||'agent unavailable')
 const d=await r.json();if(spokenTurn)speak(d.reply);return {role:'agent',text:d.reply,route:'activity',linkLabel:'See agent activity'}}catch(err){return {role:'agent',text:'The GB10 agent is busy right now ('+err.message+'). '+answer(text,files).text}}finally{spokenTurn=false}}
-function speak(text){try{if(!('speechSynthesis' in window)||!speechSynthesis.getVoices().length)return
-const u=new SpeechSynthesisUtterance(String(text).replace(/[*_`#]/g,'').slice(0,600));u.rate=1.05;speechSynthesis.cancel();speechSynthesis.speak(u)}catch{}}
+let voice=null
+async function speak(text){/* NVIDIA FastPitch + HiFi-GAN on the GB10; browser voice only as a fallback */
+try{const r=await fetch('/api/voice/speak',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:String(text).slice(0,600)})})
+if(!r.ok)throw new Error('voice unavailable');const url=URL.createObjectURL(await r.blob());if(voice)voice.pause();voice=new Audio(url);cue('welcome');await voice.play()}
+catch{try{if(!('speechSynthesis' in window)||!speechSynthesis.getVoices().length)return
+const u=new SpeechSynthesisUtterance(String(text).replace(/[*_`#]/g,'').slice(0,600));u.rate=1.05;speechSynthesis.cancel();speechSynthesis.speak(u)}catch{}}}
 fetch('/api/health').then(r=>r.ok?r.json():null).then(h=>{if(!h)return;liveOk=h.vllm==='ok'
 const el=panel.querySelector('.weaver-runtime');if(el)el.textContent=liveOk?'Live agent on GB10 · local inference':'Agent runtime offline'}).catch(()=>{})
 ;(()=>{const mic=panel.querySelector('.weaver-mic');if(!mic)return

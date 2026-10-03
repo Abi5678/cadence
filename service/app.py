@@ -129,6 +129,64 @@ def new_task(body: NewTask):
     return t
 
 
+@api.get("/api/live/tasks")
+def live_tasks(limit: int = 40):
+    """Tasks with their events and approvals, for the coordinator workspace (mascot UI)."""
+    with mcp_tools.LOCK:
+        ts = rows(conn.execute("SELECT * FROM tasks WHERE kind != 'chat' ORDER BY created_at DESC LIMIT ?", (min(limit, 100),)))
+        for t in ts:
+            t["events"] = rows(conn.execute("SELECT kind,actor,summary,created_at FROM events WHERE task_id=? ORDER BY seq DESC LIMIT 40",
+                                            (t["id"],)))[::-1]
+            t["approvals"] = rows(conn.execute("SELECT id,action,summary,state,receipt FROM approvals WHERE task_id=?", (t["id"],)))
+        evs = rows(conn.execute("SELECT seq,task_id,kind,summary,created_at FROM events WHERE kind NOT IN "
+                                "('device.reading','agent.model_call') ORDER BY seq DESC LIMIT 80"))
+        recs = rows(conn.execute("SELECT id,patient_id,status,created_at,extraction FROM recordings ORDER BY created_at DESC LIMIT 10"))
+    for r in recs:
+        r["summary"] = (json.loads(r.pop("extraction") or "{}") or {}).get("summary", "")
+    return {"tasks": ts, "events": evs, "recordings": recs}
+
+
+class TaskReply(BaseModel):
+    text: str
+
+
+@api.post("/api/tasks/{task_id}/reply")
+def task_reply(task_id: str, body: TaskReply):
+    """More information from the coordinator: recorded on the task, then the agent is woken again."""
+    with mcp_tools.LOCK:
+        t = locked(clinic.get_task, conn, task_id)
+        if t["status"] in ("completed", "cancelled"):
+            raise HTTPException(409, "This task is closed. Start a new task to continue.")
+        db.emit(conn, task_id, "coordinator.reply", "coordinator", body.text.strip()[:500])
+        conn.execute("UPDATE tasks SET status='running', brief=brief || ? WHERE id=?", (f"\nCoordinator added: {body.text.strip()[:500]}", task_id))
+    runner.wake(task_id)
+    return {"ok": True}
+
+
+class TaskStatus(BaseModel):
+    status: str
+
+
+@api.post("/api/tasks/{task_id}/status")
+def task_status(task_id: str, body: TaskStatus):
+    if body.status not in ("cancelled", "waiting", "running"):
+        raise HTTPException(400, "status must be cancelled, waiting or running")
+    t = locked(clinic.set_task_status, conn, task_id, body.status, f"Coordinator set task to {body.status}")
+    if body.status == "running":
+        runner.wake(task_id)
+    return t
+
+
+@api.post("/api/tasks/{task_id}/approve")
+def task_approve(task_id: str):
+    """Approve everything this task queued for review (each item still runs through its own adapter + receipt)."""
+    with mcp_tools.LOCK:
+        pending = rows(conn.execute("SELECT id FROM approvals WHERE task_id=? AND state='prepared'", (task_id,)))
+        done = [clinic.decide(conn, a["id"], True, "coordinator") for a in pending]
+        clinic.set_task_status(conn, task_id, "completed", f"Coordinator approved {len(done)} item(s)")
+    return {"approved": len(done)}
+
+
 @api.get("/api/tasks/{task_id}")
 def task(task_id: str):
     return locked(clinic.get_task, conn, task_id)
@@ -321,6 +379,26 @@ def impact_now():
     from . import impact
     with mcp_tools.LOCK:
         return impact.today(conn)
+
+
+class Speak(BaseModel):
+    text: str
+
+
+@api.post("/api/voice/speak")
+async def voice_speak(body: Speak):
+    """Text to speech on the GB10 (NVIDIA FastPitch + HiFi-GAN). Returns audio/wav."""
+    from fastapi.responses import Response
+
+    from . import visits
+    text = " ".join(body.text.replace("*", "").replace("#", "").split())[:600]
+    async with httpx.AsyncClient(timeout=60) as c:
+        try:
+            r = await c.post(f"{visits.ASR_URL}/tts", json={"text": text})
+            r.raise_for_status()
+        except httpx.HTTPError as e:
+            raise HTTPException(503, f"voice unavailable: {type(e).__name__}") from e
+    return Response(r.content, media_type="audio/wav", headers={"X-TTS-Seconds": r.headers.get("x-tts-seconds", "")})
 
 
 @api.get("/api/telemetry")
