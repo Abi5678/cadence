@@ -205,6 +205,8 @@ def cancel_appointment(conn, appt_id: str, reason: str = "patient request", task
     a = _appt(conn, appt_id)
     if a["status"] in ("completed", "checked_in"):
         raise ClinicError(f"cannot cancel {a['status']} appointment")
+    if a["status"] in ("cancelled", "no_show"):
+        raise ClinicError(f"{appt_id} is already {a['status']}; its slot was reopened then. Nothing to do.")
     if a["status"] == "open":
         return a
     slot_id = new_id("A")
@@ -237,10 +239,46 @@ def book_appointment(conn, patient_id: str, slot_id: str, reason: str, task_id: 
     return _appt(conn, slot_id)
 
 
-def reschedule_appointment(conn, appt_id: str, new_slot_id: str, task_id: str | None = None) -> dict:
+def offer_reschedule_options(conn, appt_id: str, slot_ids: list[str], task_id: str | None = None) -> dict:
+    """Hold up to 3 open slots for this patient and text them a numbered menu (fixed wording). Nothing is booked yet."""
     a = _appt(conn, appt_id)
+    if a["status"] not in ("booked", "confirmed"):
+        raise ClinicError(f"{appt_id} is {a['status']}; only an active visit can be rescheduled")
+    slots = []
+    for sid in list(dict.fromkeys(slot_ids))[:3]:
+        sl = _appt(conn, sid)
+        if sl["status"] != "open" or (sl["offered_to"] and sl["offered_to"] != a["patient_id"] and not _offer_expired(sl)):
+            raise ClinicError(f"slot {sid} is not available; pick others from find_open_slots")
+        slots.append(sl)
+    if not slots:
+        raise ClinicError("give 1 to 3 open slot ids from find_open_slots")
+    exp = iso(now() + timedelta(minutes=OFFER_MINUTES))
+    for sl in slots:
+        conn.execute("UPDATE appointments SET offered_to=?, offer_expires_at=?, version=version+1 WHERE id=?", (a["patient_id"], exp, sl["id"]))
+    p = one(conn.execute("SELECT name FROM patients WHERE id=?", (a["patient_id"],)))
+    names = {r["id"]: r["name"] for r in rows(conn.execute("SELECT id, name FROM providers"))}
+    menu = " ".join(f"{i}) {local(sl['starts_at'])} with {names.get(sl['provider_id'], sl['provider_id'])}." for i, sl in enumerate(slots, 1))
+    body = (f"Hi {p['name'].split()[0]}, here are other times for your visit: {menu} "
+            f"Reply {', '.join(str(i) for i in range(1, len(slots) + 1))} to pick one (held for {OFFER_MINUTES} minutes), or NO to keep your current time.")
+    propose(conn, task_id, "patient_template_message", {"patient_id": a["patient_id"], "body": body, "ref": appt_id},
+            f"Reschedule options for {appt_id}", dedupe_key=f"resched-options:{appt_id}:{','.join(s_['id'] for s_ in slots)}")
+    emit(conn, task_id, "reschedule.options", "agent", f"Held {len(slots)} slot(s) for {a['patient_id']} and texted the choices",
+         {"appointment_id": appt_id, "slots": [s_["id"] for s_ in slots]})
+    return {"appointment_id": appt_id, "options": [{"choice": i, "slot_id": s_["id"], "starts_at": s_["starts_at"]} for i, s_ in enumerate(slots, 1)],
+            "expires_at": exp}
+
+
+def reschedule_appointment(conn, appt_id: str, new_slot_id: str, task_id: str | None = None) -> dict:
+    """Move a visit to a slot the PATIENT chose from offer_reschedule_options. Never to a slot they weren't offered."""
+    a = _appt(conn, appt_id)
+    if a["status"] not in ("booked", "confirmed"):
+        raise ClinicError(f"{appt_id} is {a['status']}; it can't be rescheduled again")
+    sl = _appt(conn, new_slot_id)
+    if sl["offered_to"] != a["patient_id"] or _offer_expired(sl):
+        raise ClinicError(f"{new_slot_id} was not offered to {a['patient_id']}: use offer_reschedule_options and book only the slot they pick")
     booked = book_appointment(conn, a["patient_id"], new_slot_id, a["reason"] or "rescheduled", task_id)
     cancel_appointment(conn, appt_id, "rescheduled", task_id)
+    conn.execute("UPDATE appointments SET offered_to=NULL, offer_expires_at=NULL WHERE offered_to=? AND status='open'", (a["patient_id"],))
     return booked
 
 

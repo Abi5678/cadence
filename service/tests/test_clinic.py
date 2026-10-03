@@ -63,8 +63,28 @@ class AppointmentLoop(unittest.TestCase):
         self.assertNotIn("UTC", body)
         self.assertIn(" at ", body)
 
+    def test_reschedule_only_into_a_slot_the_patient_was_offered(self):
+        conn = fresh()
+        with self.assertRaises(clinic.ClinicError):
+            clinic.reschedule_appointment(conn, "A-203", "A-207")  # not offered to Riley: refused
+        out = clinic.offer_reschedule_options(conn, "A-203", ["A-207"])
+        self.assertEqual(out["options"][0]["slot_id"], "A-207")
+        text = db.one(conn.execute("SELECT body FROM messages WHERE party='P-103' ORDER BY created_at DESC LIMIT 1"))["body"]
+        self.assertIn("1) ", text)
+
+    def test_cancelled_visit_cannot_be_moved_or_cancelled_again(self):
+        conn = fresh()
+        clinic.offer_reschedule_options(conn, "A-203", ["A-207"])
+        clinic.reschedule_appointment(conn, "A-203", "A-207")
+        with self.assertRaises(clinic.ClinicError):
+            clinic.reschedule_appointment(conn, "A-203", "A-207")
+        with self.assertRaises(clinic.ClinicError):
+            clinic.cancel_appointment(conn, "A-203")
+        self.assertEqual(db.one(conn.execute("SELECT COUNT(*) n FROM appointments WHERE patient_id='P-103' AND status='confirmed'"))["n"], 1)
+
     def test_reschedule(self):
         conn = fresh()
+        clinic.offer_reschedule_options(conn, "A-203", ["A-207"])
         booked = clinic.reschedule_appointment(conn, "A-203", "A-207")
         self.assertEqual(booked["patient_id"], "P-103")
         self.assertEqual(clinic._appt(conn, "A-203")["status"], "cancelled")

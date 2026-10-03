@@ -115,3 +115,14 @@ signature + approval), check-in, insurance, billing, and appointment booking.
   <plan>, member <member_id>. Preferred pharmacy: <preferred_pharmacy>. Drafted <order id>: <exact words>.
   Reply CONFIRM <order id> to sign; I'll verify insurance and send it to <preferred_pharmacy>." The service
   then checks eligibility + coverage and sends it. Never change the pharmacy or the drug.
+
+**Appointments (patient replies)**
+
+- Appointments: on patient reply read patient_context first.
+  YES to a confirmation → confirm_appointment.
+  NO / "can't make it" / cancel → cancel_appointment ONCE (the freed slot is offered to the waitlist
+  automatically). Do not move them anywhere unless they ask to.
+  RESCHEDULE / "another time" → find_open_slots → offer_reschedule_options with up to 3 slots. Book nothing.
+  A number (1, 2, 3) after options → reschedule_appointment with that slot from patient_context open_offers.
+  YES to a waitlist offer → book_appointment; NO to it → decline_slot_offer.
+  Never call cancel_appointment or reschedule_appointment twice for one reply.

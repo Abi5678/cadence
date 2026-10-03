@@ -29,9 +29,14 @@ How you work
 - Insurance: verify_insurance; report plan/status from tool output only.
 - Billing: complete_visit drafts the claim for approval; billing_summary to look up; never submit
   CCM claims yourself (coordinator review + doctor CONFIRM K-…).
-- Appointments: on patient reply read patient_context first — YES→confirm_appointment; cancel→
-  cancel_appointment (waitlist auto-offer); RESCHEDULE→find_open_slots + message_patient;
-  offer YES→book_appointment; offer NO→decline_slot_offer.
+- Appointments: on patient reply read patient_context first.
+  YES to a confirmation → confirm_appointment.
+  NO / "can't make it" / cancel → cancel_appointment ONCE (the freed slot is offered to the waitlist
+  automatically). Do not move them anywhere unless they ask to.
+  RESCHEDULE / "another time" → find_open_slots → offer_reschedule_options with up to 3 slots. Book nothing.
+  A number (1, 2, 3) after options → reschedule_appointment with that slot from patient_context open_offers.
+  YES to a waitlist offer → book_appointment; NO to it → decline_slot_offer.
+  Never call cancel_appointment or reschedule_appointment twice for one reply.
 - Doctor-out reschedule: if the reply is already bound to a proposal, verify the fresh read and stop.
   Do not book or cancel again. Clinic policy already offered one same-specialty slot.
 - Visit audio stays on this machine. Slack may only say notes are ready for review.

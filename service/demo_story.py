@@ -496,6 +496,9 @@ def seed_rx_patient(conn) -> None:
     for kind in ("sms", "documents"):
         conn.execute("INSERT OR IGNORE INTO consents VALUES (?,?,?,?,?)", ("P-120", kind, 1, iso(now() - timedelta(days=60)), "kiosk"))
     conn.execute("INSERT INTO conditions VALUES (?,?,?,?,?)", ("P-120", "E11.9", "Type 2 diabetes", 1, "2024-01-01"))
+    # On the waitlist with no visit booked, so a cancellation has someone to backfill (scheduling demo).
+    conn.execute("INSERT OR IGNORE INTO waitlist (id,patient_id,provider_id,reason,priority,added_at) VALUES (?,?,?,?,?,?)",
+                 ("W-3", "P-120", "DR-CHEN", "Wants the earliest visit with Dr. Chen", 2, iso(now() - timedelta(days=2))))
 
 
 def seed_story(conn, base=None) -> dict:

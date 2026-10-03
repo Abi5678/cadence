@@ -118,8 +118,16 @@ def find_open_slots(provider_id: str | None = None) -> list:
 
 
 @tool
+def offer_reschedule_options(appointment_id: str, slot_ids: list[str], task_id: str | None = None) -> dict:
+    """Patient wants a different time: hold 1-3 open slots (from find_open_slots) and text them a numbered menu.
+    Books nothing. When they reply with a number, call reschedule_appointment with that slot."""
+    return clinic.offer_reschedule_options(_conn, appointment_id, slot_ids, task_id)
+
+
+@tool
 def reschedule_appointment(appointment_id: str, new_slot_id: str, task_id: str | None = None) -> dict:
-    """Move a patient's appointment into an open slot; the old slot is reopened for the waitlist."""
+    """Book the slot the patient picked from offer_reschedule_options; the old visit is released. Refuses any slot
+    that wasn't offered to this patient, and any visit that is already cancelled."""
     return clinic.reschedule_appointment(_conn, appointment_id, new_slot_id, task_id)
 
 
