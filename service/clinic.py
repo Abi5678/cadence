@@ -367,9 +367,15 @@ def record_vitals(conn, patient_id: str, kind: str, value: float, unit: str = ""
     emit(conn, None, "vitals.recorded", source, f"{patient_id} {kind}={value}{unit}" + (" OUT OF RANGE" if out_of_range else ""),
          {"patient_id": patient_id, "out_of_range": out_of_range})
     if out_of_range:
-        prov = one(conn.execute("SELECT provider_id FROM appointments WHERE patient_id=? ORDER BY starts_at DESC LIMIT 1", (patient_id,)))
-        escalate_to_doctor(conn, (prov or {}).get("provider_id") or "DR-CHEN", patient_id,
-                           f"Remote monitoring: {kind}={value}{unit} outside alert range {lo_hi}.", None)
+        # One doctor alert per patient per 30 minutes; repeats are recorded but not re-sent.
+        recent = one(conn.execute("SELECT id FROM approvals WHERE action='escalate_to_doctor' AND payload LIKE ? AND created_at >= ?",
+                                  (f'%"patient_id": "{patient_id}"%', iso(now() - timedelta(minutes=30)))))
+        if recent:
+            emit(conn, None, "vitals.coalesced", "service", f"{patient_id} {kind}={value}{unit}: added to open alert {recent['id']}")
+        else:
+            prov = one(conn.execute("SELECT provider_id FROM appointments WHERE patient_id=? ORDER BY starts_at DESC LIMIT 1", (patient_id,)))
+            escalate_to_doctor(conn, (prov or {}).get("provider_id") or "DR-CHEN", patient_id,
+                               f"Remote monitoring: {kind}={value}{unit} outside alert range {lo_hi}.", None)
     return {"id": vid, "out_of_range": out_of_range}
 
 

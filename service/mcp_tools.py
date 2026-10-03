@@ -243,6 +243,37 @@ def consent_status(patient_id: str) -> list:
     return rows(_conn.execute("SELECT kind,granted,recorded_at,recorded_by FROM consents WHERE patient_id=?", (patient_id,)))
 
 
+# ---- chronic care management / remote monitoring ----
+
+@tool
+def ccm_overview() -> list:
+    """Patients enrolled in chronic care management / remote monitoring, with conditions and devices."""
+    from . import ccm
+    return ccm.monitored(_conn)
+
+
+@tool
+def ccm_gaps() -> list:
+    """Patients at risk of missing this month's CCM/RPM thresholds (staff minutes, reading days), so staff can schedule care calls."""
+    from . import ccm
+    return ccm.gaps_this_month(_conn)
+
+
+@tool
+def build_ccm_packet(patient_id: str, month: str | None = None, task_id: str | None = None) -> dict:
+    """Audit one patient-month (default: last month) and draft the CCM/RPM billing packet for coordinator review.
+    Never submits a claim: the coordinator reviews and the provider attests first. Agent time is never billable."""
+    from . import ccm
+    return ccm.build_packet(_conn, patient_id, month, task_id)
+
+
+@tool
+def ccm_month_end_close(month: str | None = None, task_id: str | None = None) -> dict:
+    """Build audit packets for every enrolled patient for a month (default: last month) and summarize totals and gaps."""
+    from . import ccm
+    return ccm.month_end_close(_conn, month, task_id)
+
+
 # ---- inventory & staffing --------------------------------------------------
 
 @tool

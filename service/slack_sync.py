@@ -10,13 +10,14 @@ from __future__ import annotations
 import logging
 import os
 import re
+import threading
 
 from . import clinic
 from .db import emit, one, rows
 
 log = logging.getLogger("cadence.slack")
-COMMAND = re.compile(r"\b(CONFIRM|RELEASE|CANCEL)\b((?:[\s,]+[OD]-[\w-]+)+)", re.IGNORECASE)
-IDS = re.compile(r"\b[OD]-[\w-]+", re.IGNORECASE)
+COMMAND = re.compile(r"\b(CONFIRM|RELEASE|CANCEL)\b((?:[\s,]+[ODK]-[\w-]+)+)", re.IGNORECASE)
+IDS = re.compile(r"\b[ODK]-[\w-]+", re.IGNORECASE)
 
 
 def parse_commands(text: str) -> list[tuple[str, str]]:
@@ -30,6 +31,11 @@ def apply_command(conn, provider_id: str, verb: str, ref_id: str, signature_ref:
     if verb == "CONFIRM" and ref_id.startswith("O-"):
         o = clinic.sign_order(conn, ref_id, provider_id, signature_ref)
         return f"{ref_id}: {(o or {}).get('status', 'not found')}"
+    if verb == "CONFIRM" and ref_id.startswith("K-"):
+        from . import ccm
+        ccm.attest_packet(conn, ref_id, provider_id, f"slack:{signature_ref}")
+        k = one(conn.execute("SELECT status FROM ccm_packets WHERE id=?", (ref_id,)))
+        return f"{ref_id}: {(k or {}).get('status', 'not found')}"
     if verb == "CANCEL" and ref_id.startswith("O-"):
         clinic.cancel_order(conn, ref_id, provider_id)
         return f"{ref_id}: cancelled"
@@ -37,6 +43,38 @@ def apply_command(conn, provider_id: str, verb: str, ref_id: str, signature_ref:
         clinic.release_document(conn, ref_id, provider_id)
         return f"{ref_id}: released"
     return f"{ref_id}: ignored"
+
+
+def _handle_clip(conn, lock, client, channel, prov, f, m) -> None:
+    """Download a doctor's voice/video clip with the bot token and run the GB10 visit pipeline."""
+    from . import visits
+    import httpx
+
+    def reply(text):
+        client.chat_postMessage(channel=channel, thread_ts=m["ts"], text=text)
+    try:
+        if (f.get("size") or 0) > visits.MAX_CLIP_BYTES:
+            return reply("That clip is over 50 MB; please send a shorter one.")
+        url = f.get("url_private_download") or f.get("url_private")
+        audio = httpx.get(url, headers={"Authorization": f"Bearer {os.environ['SLACK_BOT_TOKEN']}"}, timeout=120, follow_redirects=True).content
+        visits.process_clip(conn, prov["id"], prov["slack_user"], f, audio, m.get("text", ""), m["ts"], reply)
+    except Exception as e:  # noqa: BLE001 - tell the doctor rather than failing silently
+        log.exception("clip failed")
+        with lock:
+            emit(conn, None, "voice.error", "service", f"Voice clip failed: {type(e).__name__}: {e}"[:300])
+        reply(f"Sorry, I couldn't process that clip ({type(e).__name__}). The care team has been notified.")
+
+
+def announce(conn, lock) -> None:
+    """Send one 'on duty' DM per doctor so we learn the DM channel (the bot token has no im:write)."""
+    from . import adapters
+    if not os.environ.get("SLACK_BOT_TOKEN"):
+        return
+    with lock:
+        for prov in rows(conn.execute("SELECT id FROM providers WHERE slack_user IS NOT NULL")):
+            if not one(conn.execute("SELECT v FROM kv WHERE k=?", (f"slack_dm_channel:{prov['id']}",))):
+                adapters.slack_dm(conn, prov["id"], "Cadence is on duty on the clinic GB10. Send me orders by patient ID, or a voice clip "
+                                                    "of a visit, and I'll draft the note and orders for you to sign.")
 
 
 def _client():
@@ -69,6 +107,9 @@ def sync(conn, lock) -> list[str]:
         for m in sorted(msgs, key=lambda m: float(m["ts"])):
             if m.get("user") != prov["slack_user"] or m.get("bot_id"):
                 continue  # only the doctor's own messages count as signatures
+            for f in m.get("files") or []:
+                if (f.get("mimetype") or "").startswith(("audio/", "video/")):
+                    threading.Thread(target=_handle_clip, args=(conn, lock, client, channel, prov, f, m), daemon=True).start()
             results = []
             with lock:
                 for verb, ref_id in parse_commands(m.get("text", "")):

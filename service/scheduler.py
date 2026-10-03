@@ -31,6 +31,8 @@ def run_sweep(conn, runner) -> dict:
                 t = clinic.create_task(conn, kind, title, brief.format(", ".join(items)), dedupe_key=key)
                 if t["status"] == "running":
                     new.append(t["id"])
+        from . import ccm
+        out["remittances"] = ccm.remittances_due(conn)
         # Retry tasks still waiting on the agent (e.g. model was not up yet). Dedup by inflight set.
         retry = [r["id"] for r in conn.execute("SELECT id FROM tasks WHERE status='running' ORDER BY created_at").fetchall()]
     for tid in dict.fromkeys(new + retry):
@@ -54,6 +56,10 @@ def on_event(conn, runner):
 async def slack_loop(conn) -> None:
     """Doctor CONFIRM/RELEASE/CANCEL replies, verified against Slack every few seconds."""
     from . import slack_sync
+    try:
+        await asyncio.to_thread(slack_sync.announce, conn, mcp_tools.LOCK)
+    except Exception:  # noqa: BLE001
+        log.exception("slack announce failed")
     while True:
         try:
             await asyncio.to_thread(slack_sync.sync, conn, mcp_tools.LOCK)

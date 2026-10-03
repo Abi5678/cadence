@@ -149,7 +149,8 @@ class InventoryStaffing(unittest.TestCase):
     def test_shift_fill_respects_overlap_and_role(self):
         conn = fresh()
         cands = [c["id"] for c in clinic.suggest_shift_fill(conn, "SH-1-RN2")]
-        self.assertEqual(cands, ["S-2"])  # S-1 overlaps
+        self.assertEqual(cands[0], "S-2")  # fewest hours first
+        self.assertNotIn("S-1", cands)  # S-1 overlaps
         with self.assertRaises(clinic.ClinicError):
             clinic.propose_shift_fill(conn, "SH-1-RN2", "S-1")
         ap = clinic.propose_shift_fill(conn, "SH-1-RN2", "S-2")

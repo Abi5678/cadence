@@ -133,6 +133,21 @@ def payer_eligibility(conn, patient: dict) -> dict:
             "reference": _receipt("ELIG")}
 
 
+def submit_medicare_claim(conn, p: dict) -> str:
+    """Mock 837P submission to a Medicare Administrative Contractor. Remittance (835) arrives later."""
+    import json as _json
+    k = one(conn.execute("SELECT * FROM ccm_packets WHERE id=?", (p["packet_id"],)))
+    if not k or k["status"] != "attested":
+        raise RuntimeError("packet must be coordinator-reviewed and provider-attested")
+    r = _json.loads(k["result"])
+    cid, rid = new_id("CLM"), _receipt("MAC")
+    conn.execute("INSERT INTO claims VALUES (?,?,?,?,?,?,?,?,?,?)",
+                 (cid, k["id"], k["patient_id"], "Medicare Part B (mock MAC)", _json.dumps(r["codes"]), r["billed"], "submitted", rid, None, iso(now())))
+    conn.execute("UPDATE ccm_packets SET status='submitted' WHERE id=?", (k["id"],))
+    slack_dm(conn, k["attested_by"] or "DR-CHEN", f"Medicare claim {cid} submitted for {r['patient']} ({k['month']}), ${r['billed']:.2f}. Acknowledgement {rid}.")
+    return rid
+
+
 EXECUTORS = {
     "patient_template_message": patient_template_message,
     "patient_message": patient_message,
@@ -143,4 +158,5 @@ EXECUTORS = {
     "fill_shift": fill_shift,
     "escalate_to_doctor": escalate_to_doctor,
     "send_document": send_document,
+    "submit_medicare_claim": submit_medicare_claim,
 }

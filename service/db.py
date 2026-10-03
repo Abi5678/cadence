@@ -122,6 +122,9 @@ def connect(path: Path | str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(p, check_same_thread=False, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
+    from . import ccm, visits
+    ccm.ensure_schema(conn)
+    visits.ensure_schema(conn)
     return conn
 
 
@@ -171,7 +174,7 @@ def seed(conn: sqlite3.Connection, base: datetime | None = None) -> None:
     ins("INSERT INTO staff VALUES (?,?,?,?)", [
         ("S-1", "Sam (RN)", "nurse", 40), ("S-2", "Lee (RN)", "nurse", 36),
         ("S-3", "Kim (MA)", "medical_assistant", 40), ("S-4", "Pat (Front desk)", "front_desk", 40),
-        ("S-5", "Alex (MA)", "medical_assistant", 24),
+        ("S-5", "Alex (MA)", "medical_assistant", 24), ("S-6", "Jamie (CCM nurse)", "nurse", 40),
     ])
     tomorrow = today9 + timedelta(days=1)
     shifts = []
@@ -221,6 +224,8 @@ def seed(conn: sqlite3.Connection, base: datetime | None = None) -> None:
         ("O-302", "rx", "P-104", "DR-CHEN", "Synthetic-cillin 500 mg, 1 cap PO BID x 7 days, #14, 0 refills", "DR-CHEN", iso(base - timedelta(hours=1)), "received", iso(base), "seed"),
         ("O-303", "rx", "P-101", "DR-PATEL", "Placebo-statin 20 mg daily, #30", None, None, "received", iso(base), "seed"),
     ])
+    from . import ccm
+    ccm.seed(conn, base)
 
 
 def emit(conn: sqlite3.Connection, task_id: str | None, kind: str, actor: str, summary: str, data: dict | None = None) -> dict:

@@ -16,13 +16,13 @@ from pathlib import Path
 
 import httpx
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import agent, clinic, db, mcp_tools, scheduler
-from .db import LISTENERS, rows
+from . import agent, ccm, clinic, db, devices, mcp_tools, scheduler
+from .db import LISTENERS, one, rows
 
 log = logging.getLogger("cadence")
 ROOT = Path(__file__).resolve().parent.parent
@@ -52,6 +52,7 @@ async def _start() -> None:
     runner.start()
     asyncio.create_task(scheduler.loop(conn, runner))
     asyncio.create_task(scheduler.slack_loop(conn))
+    asyncio.create_task(devices.loop(conn, runner))
 
 
 def locked(fn, *a, **kw):
@@ -196,6 +197,113 @@ def consent(body: Consent):
 @api.post("/api/documents/{doc_id}/send")
 def send_doc(doc_id: str):
     return locked(clinic.send_document, conn, doc_id)
+
+
+@api.get("/api/ccm")
+def ccm_state():
+    with mcp_tools.LOCK:
+        packets = [dict(k, result=json.loads(k["result"])) for k in rows(conn.execute("SELECT * FROM ccm_packets ORDER BY created_at DESC"))]
+        return {"monitored": ccm.monitored(conn), "packets": packets, "gaps": ccm.gaps_this_month(conn),
+                "claims": rows(conn.execute("SELECT * FROM claims ORDER BY submitted_at DESC")), "month": ccm.prev_month(),
+                "devices": devices.STATE | {"until": str(devices.STATE["until"] or "")}}
+
+
+@api.post("/api/ccm/close")
+def ccm_close():
+    t = locked(clinic.create_task, conn, "ccm", f"Month-end CCM/RPM close for {ccm.prev_month()}",
+               f"Run ccm_month_end_close for {ccm.prev_month()}, then post a short summary: packets ready for review, total, and the main gaps.")
+    runner.wake(t["id"])
+    return t
+
+
+class PacketReview(BaseModel):
+    approve: bool
+
+
+@api.post("/api/ccm/packets/{kid}/review")
+def ccm_review(kid: str, body: PacketReview):
+    with mcp_tools.LOCK:
+        try:
+            return ccm.review_packet(conn, kid, body.approve, "coordinator")
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from e
+
+
+@api.post("/api/ccm/packets/{kid}/attest")
+def ccm_attest(kid: str):
+    """Demo fallback when Slack is unavailable; the normal path is the doctor's CONFIRM in Slack."""
+    with mcp_tools.LOCK:
+        return ccm.attest_packet(conn, kid, "DR-CHEN", "ui-demo")
+
+
+class StaffTime(BaseModel):
+    patient_id: str
+    staff_id: str
+    minutes: float
+    activity: str
+    program: str
+    interactive: bool = True
+
+
+@api.post("/api/ccm/time")
+def ccm_time(body: StaffTime):
+    with mcp_tools.LOCK:
+        try:
+            return ccm.log_staff_time(conn, body.patient_id, body.staff_id, body.minutes, body.activity, body.program, body.interactive)
+        except ValueError as e:
+            raise HTTPException(409, str(e)) from e
+
+
+@api.post("/api/sim/voice")
+async def sim_voice(file: UploadFile = File(...), message: str = Form("")):
+    """Run the voice pipeline on an uploaded clip without Slack (demo fallback). Replies go to the activity feed."""
+    from . import visits
+    audio = await file.read()
+    replies: list[str] = []
+    out = await asyncio.to_thread(visits.process_clip, conn, "DR-CHEN",
+                                  one(conn.execute("SELECT slack_user FROM providers WHERE id='DR-CHEN'"))["slack_user"] or "UDEMO",
+                                  {"id": f"upload-{db.new_id('F')}", "name": file.filename}, audio, message, "", replies.append)
+    return {**out, "replies": replies}
+
+
+@api.get("/api/recordings")
+def recordings():
+    with mcp_tools.LOCK:
+        return [dict(r, segments=json.loads(r["segments"] or "[]"), extraction=json.loads(r["extraction"] or "{}"), timings=json.loads(r["timings"] or "{}"))
+                for r in rows(conn.execute("SELECT * FROM recordings ORDER BY created_at DESC LIMIT 20"))]
+
+
+@api.get("/api/telemetry")
+async def telemetry_now():
+    from . import telemetry
+    g, v = await asyncio.gather(asyncio.to_thread(telemetry.gpu), asyncio.to_thread(telemetry.vllm, agent.VLLM_URL))
+    with mcp_tools.LOCK:
+        a = telemetry.activity(conn)
+        tiles = rows(conn.execute(
+            "SELECT e.patient_id, p.name, (SELECT kind||'='||value||unit FROM vitals v WHERE v.patient_id=e.patient_id ORDER BY recorded_at DESC LIMIT 1) AS last, "
+            "(SELECT recorded_at FROM vitals v WHERE v.patient_id=e.patient_id ORDER BY recorded_at DESC LIMIT 1) AS at, "
+            "(SELECT COUNT(*) FROM events ev WHERE ev.kind='vitals.recorded' AND ev.summary LIKE e.patient_id||' %OUT OF RANGE%' "
+            " AND ev.created_at >= ?) AS alerts "
+            "FROM ccm_enrollments e JOIN patients p ON p.id=e.patient_id ORDER BY e.patient_id",
+            (db.iso(db.now() - __import__('datetime').timedelta(minutes=30)),)))
+    return {"gpu": g, "vllm": v, "activity": a, "tiles": tiles, "devices": {k: str(v) for k, v in devices.STATE.items()},
+            "agent_backend": agent.backend(), "model": agent.VLLM_MODEL, "now": db.iso(db.now())}
+
+
+@api.get("/api/replay")
+async def replay(since: str):
+    from . import telemetry
+    with mcp_tools.LOCK:
+        evs = rows(conn.execute("SELECT * FROM events WHERE created_at>=? AND kind NOT IN ('device.reading') ORDER BY seq", (since,)))
+        readings = conn.execute("SELECT COUNT(*) FROM vitals WHERE recorded_at>=?", (since,)).fetchone()[0]
+    summary = await asyncio.to_thread(telemetry.replay_summary, evs, agent.VLLM_URL, agent.VLLM_MODEL)
+    return {"since": since, "readings": readings, "events": evs[-200:], "summary": summary}
+
+
+@api.post("/api/nightshift")
+def nightshift():
+    with mcp_tools.LOCK:
+        return devices.start_night_shift(conn)
 
 
 @api.post("/api/visits/{appt_id}/checkin")
