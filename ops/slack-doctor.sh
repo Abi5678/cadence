@@ -11,6 +11,7 @@ export SLACK_ALLOWED_USERS="$1" NEMOCLAW_AGENT=hermes
 printf 'Slack bot token (xoxb-, hidden): ' >&2; IFS= read -r -s SLACK_BOT_TOKEN; printf '\n' >&2
 printf 'Slack app token (xapp-, hidden): ' >&2; IFS= read -r -s SLACK_APP_TOKEN; printf '\n' >&2
 export SLACK_BOT_TOKEN SLACK_APP_TOKEN
+echo "If asked for 'Slack Channel IDs', press Enter to skip (DMs don't need it). Never paste a token there." >&2
 nemohermes cadence channels remove slack --yes || nemohermes cadence channels remove slack
 nemohermes cadence channels add slack --yes || nemohermes cadence channels add slack
 nemohermes cadence status | tail -3
