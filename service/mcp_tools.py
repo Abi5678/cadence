@@ -253,8 +253,22 @@ def ccm_overview() -> list:
 
 
 @tool
+def ccm_packets(month: str | None = None) -> list:
+    """Existing CCM/RPM audit packets for a month (default: last month): status (needs_review, not_billable, submitted, paid...),
+    codes, amount and the reasons any check failed. Use this for questions about last month's billing."""
+    from . import ccm
+    m = month or ccm.prev_month()
+    out = []
+    for k in rows(_conn.execute("SELECT * FROM ccm_packets WHERE month=? ORDER BY patient_id", (m,))):
+        r = json.loads(k["result"])
+        out.append({"packet_id": k["id"], "patient_id": k["patient_id"], "patient": r["patient"], "status": k["status"],
+                    "codes": [c["code"] for c in r["codes"]], "billed": r["billed"], "failed_checks": r["gaps"]})
+    return out
+
+
+@tool
 def ccm_gaps() -> list:
-    """Patients at risk of missing this month's CCM/RPM thresholds (staff minutes, reading days), so staff can schedule care calls."""
+    """THIS month only: patients at risk of missing CCM/RPM thresholds (staff minutes, reading days), so staff can schedule care calls."""
     from . import ccm
     return ccm.gaps_this_month(_conn)
 

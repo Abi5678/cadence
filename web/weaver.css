@@ -51,3 +51,7 @@ body.weaver-tab-hidden .weaver-pose{animation-play-state:paused}
 .weaver-pose[data-pose=greeting]{--wx:0%;--wy:0%;animation:weaver-wave-hi 1.9s ease-in-out both;z-index:2}
 @keyframes weaver-wave-hi{0%{transform:translateY(0) rotate(0) scale(1)}14%{transform:translateY(-7px) rotate(-6deg) scale(1.03)}27%{transform:translateY(-5px) rotate(8deg)}40%{transform:translateY(-6px) rotate(-8deg)}53%{transform:translateY(-4px) rotate(7deg)}66%{transform:translateY(-5px) rotate(-6deg)}79%{transform:translateY(-3px) rotate(4deg)}100%{transform:translateY(0) rotate(0) scale(1)}}
 @media(prefers-reduced-motion:reduce){.weaver-pose[data-pose=greeting]{animation:none!important}}
+.weaver-mic{min-width:42px;font-size:16px;padding:8px 10px;border-radius:50%;border:1px solid #c9c6e6;background:#fff}
+.weaver-mic.recording{background:#d9534f;border-color:#d9534f;color:#fff;animation:weaver-mic-pulse 1.2s infinite}
+@keyframes weaver-mic-pulse{0%{box-shadow:0 0 0 0 #d9534f80}70%{box-shadow:0 0 0 10px #d9534f00}100%{box-shadow:0 0 0 0 #d9534f00}}
+@media (prefers-reduced-motion:reduce){.weaver-mic.recording{animation:none}}

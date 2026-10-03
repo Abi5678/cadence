@@ -15,7 +15,11 @@ import json
 import random
 from datetime import date, datetime, timedelta, timezone
 
+import os
+
 from . import adapters
+
+CLINIC_TZ_NAME = os.environ.get("CADENCE_TZ", "America/New_York")
 from .db import emit, iso, new_id, now, one, parse, rows
 
 FEE = {"99490": 60.49, "99439": 45.93, "99454": 46.88, "99457": 47.87, "99458": 38.49}  # demo fee schedule, not real rates
@@ -168,9 +172,10 @@ def build_packet(conn, patient_id: str, month: str | None = None, task_id: str |
     def check(name, ok, detail, evidence=None):
         checks.append({"check": name, "ok": bool(ok), "detail": detail, "evidence": evidence or []})
         if not ok:
-            gaps.append(f"{name}: {detail}")
+            gaps.append(f"NOT MET: {name} (found: {detail})")
 
-    check("Two or more chronic conditions", len(conds) >= 2, ", ".join(f"{c['code']} {c['description']}" for c in conds) or "none",
+    check("Two or more chronic conditions", len(conds) >= 2,
+          f"{len(conds)} chronic condition(s): " + (", ".join(f"{c['code']} {c['description']}" for c in conds) or "none"),
           [c["code"] for c in conds])
     consent_ok = bool(enr["consent_at"]) and enr["cost_share_disclosed"] and parse(enr["consent_at"]) < e
     check("Consent documented with cost-share disclosure", consent_ok,

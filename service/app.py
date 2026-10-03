@@ -273,6 +273,47 @@ def recordings():
                 for r in rows(conn.execute("SELECT * FROM recordings ORDER BY created_at DESC LIMIT 20"))]
 
 
+class Chat(BaseModel):
+    message: str
+    history: list[dict] = []
+
+
+@api.post("/api/chat")
+async def chat(body: Chat):
+    """Coordinator chat: one live agent turn on the GB10 with the clinic tools (direct loop, for chat latency)."""
+    msg = body.message.strip()[:2000]
+    if not msg:
+        raise HTTPException(400, "empty message")
+    with mcp_tools.LOCK:
+        t = clinic.create_task(conn, "chat", f"Coordinator: {msg[:80]}", msg)
+    hist = [{"role": h["role"], "content": str(h["content"])[:2000]} for h in body.history[-8:]
+            if h.get("role") in ("user", "assistant") and h.get("content")]
+    try:
+        reply = await agent.run_direct(conn, t, history=hist or [{"role": "assistant", "content": "Hi, I'm Weaver."}],
+                                       system=agent.CHAT_INSTRUCTIONS)
+    except Exception as e:  # noqa: BLE001
+        with mcp_tools.LOCK:
+            clinic.set_task_status(conn, t["id"], "failed", f"chat failed: {e}"[:200])
+        raise HTTPException(503, "The GB10 agent is busy or unavailable; try again in a moment.") from e
+    with mcp_tools.LOCK:
+        clinic.set_task_status(conn, t["id"], "completed", (reply or "")[:300])
+    return {"reply": (reply or "").strip(), "task_id": t["id"]}
+
+
+@api.post("/api/voice/command")
+async def voice_command(file: UploadFile = File(...)):
+    """Speech to text for the coordinator mic, on the GB10 (NVIDIA Parakeet)."""
+    from . import visits
+    audio = await file.read()
+    if len(audio) > visits.MAX_CLIP_BYTES:
+        raise HTTPException(413, "recording too long")
+    try:
+        asr = await asyncio.to_thread(visits.transcribe, audio, file.filename or "speech.webm")
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"speech service unavailable: {type(e).__name__}") from e
+    return {"text": " ".join(s["text"] for s in asr["segments"]).strip(), "timings": asr["timings"], "duration_s": asr.get("duration_s")}
+
+
 @api.get("/api/telemetry")
 async def telemetry_now():
     from . import telemetry

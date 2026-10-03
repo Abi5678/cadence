@@ -36,8 +36,16 @@ def backend() -> str:
     return "hermes" if os.environ.get("HERMES_API_TOKEN") else "direct"
 
 
+def today_line() -> str:
+    from .ccm import CLINIC_TZ_NAME, prev_month
+    from .db import now
+    from zoneinfo import ZoneInfo
+    local = now().astimezone(ZoneInfo(CLINIC_TZ_NAME))
+    return f"Today is {local:%A %Y-%m-%d %H:%M} clinic time. This month is {local:%Y-%m}; last month is {prev_month()}."
+
+
 def task_prompt(task: dict) -> str:
-    return (f"New Cadence task {task['id']} ({task['kind']}): {task['title']}\n"
+    return (f"{today_line()}\nNew Cadence task {task['id']} ({task['kind']}): {task['title']}\n"
             f"Brief: {task['brief'] or '(none)'}\n"
             "Call get_task first, act with the cadence tools, then finish_task.")
 
@@ -48,15 +56,22 @@ async def _tool_schemas() -> list[dict]:
             for t in await server.list_tools()]
 
 
-async def run_direct(conn, task: dict) -> str:
+CHAT_INSTRUCTIONS = AGENT_INSTRUCTIONS + """
+You are answering the clinic coordinator in a live chat (sometimes spoken aloud). Use tools to look things up or act,
+then reply in at most 4 short sentences of plain text: no markdown tables, no ids unless useful. Do not call
+finish_task or post_event in chat; just answer."""
+
+
+async def run_direct(conn, task: dict, history: list[dict] | None = None, system: str | None = None) -> str:
     tools = await _tool_schemas()
-    messages = [{"role": "system", "content": AGENT_INSTRUCTIONS}, {"role": "user", "content": task_prompt(task)}]
+    messages = [{"role": "system", "content": (system or AGENT_INSTRUCTIONS) + "\n" + today_line()}, *(history or []),
+                {"role": "user", "content": task_prompt(task) if not history and system is None else task["brief"]}]
     async with httpx.AsyncClient(timeout=180) as client:
         for step in range(MAX_STEPS):
             t0 = time.monotonic()
             r = await client.post(f"{VLLM_URL}/chat/completions", json={
                 "model": VLLM_MODEL, "messages": messages, "tools": tools, "tool_choice": "auto",
-                "temperature": 0.2, "max_tokens": 1024})
+                "temperature": 0.2, "max_tokens": 1024, "chat_template_kwargs": {"enable_thinking": False}})
             r.raise_for_status()
             body = r.json()
             msg = body["choices"][0]["message"]
