@@ -76,7 +76,6 @@ async def run_direct(conn, task: dict) -> str:
                     result = await asyncio.to_thread(fn, **args)
                 except Exception as e:  # noqa: BLE001 - feed tool failures back to the model
                     result = json.dumps({"error": f"{type(e).__name__}: {e}"})
-                emit(conn, task["id"], "agent.tool_call", "agent", f"{name}({', '.join(f'{k}={v}' for k, v in args.items()) if isinstance(args, dict) else ''})"[:300])
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": result[:6000]})
     return "step limit reached"
 

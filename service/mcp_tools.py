@@ -16,6 +16,7 @@ from .db import emit, one, rows
 LOCK = threading.RLock()
 _conn = None
 TOOLS: dict[str, Callable] = {}
+QUIET = {"post_event", "finish_task"}  # these already write their own events
 
 
 def bind(conn) -> None:
@@ -27,6 +28,9 @@ def tool(fn):
     @functools.wraps(fn)
     def wrapper(*args, **kwargs):
         with LOCK:
+            if fn.__name__ not in QUIET:
+                shown = ", ".join(f"{k}={v}" for k, v in kwargs.items() if k != "task_id")
+                emit(_conn, kwargs.get("task_id"), "agent.tool_call", "agent", f"{fn.__name__}({shown})"[:300])
             try:
                 result = fn(*args, **kwargs)
             except clinic.ClinicError as e:
