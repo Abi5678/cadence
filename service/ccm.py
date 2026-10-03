@@ -222,7 +222,7 @@ def build_packet(conn, patient_id: str, month: str | None = None, task_id: str |
              f"Agent work: {mins['agent_actions']} actions / {mins['agent']:.0f} min, excluded from billable time.",
              "Requires coordinator review and provider attestation before submission."]
     existing = one(conn.execute("SELECT * FROM ccm_packets WHERE patient_id=? AND month=?", (patient_id, month)))
-    if existing and existing["status"] not in ("draft", "needs_review"):
+    if existing and existing["status"] not in ("draft", "needs_review", "not_billable", "returned"):
         return dict(existing, result=json.loads(existing["result"]))
     from .clinic import create_document
     doc = create_document(conn, patient_id, "ccm_packet", f"CCM/RPM packet {month}", "\n".join(lines), status="needs_release")
