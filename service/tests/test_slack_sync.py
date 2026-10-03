@@ -15,6 +15,9 @@ class FakeSlack:
     def conversations_history(self, channel, limit=50, oldest=None):
         return {"messages": [m for m in self.messages if not oldest or float(m["ts"]) > float(oldest)]}
 
+    def conversations_replies(self, channel, ts, limit=100):
+        return {"messages": [m for m in self.messages if m["ts"] == ts] + [m for m in self.messages if m.get("thread_ts") == ts and m["ts"] != ts]}
+
     def chat_postMessage(self, channel, text, thread_ts=None):
         self.posts.append({"channel": channel, "text": text, "thread_ts": thread_ts})
         return {"ts": "9.9", "channel": channel}
@@ -44,6 +47,16 @@ class SignaturesFromSlack(unittest.TestCase):
         self.assertEqual((row["status"], row["signed_by"], row["signature_ref"]), ("pending_approval", "DR-CHEN", "101.0"))
         self.assertEqual(fake.posts[-1]["thread_ts"], "101.0")
         self.assertIn("Recorded", fake.posts[-1]["text"])
+
+    def test_confirm_inside_a_thread_is_seen(self):
+        conn = fresh()
+        o = clinic.draft_doctor_order(conn, DOC, "P-104", "lab", "CBC")
+        parent = {"ts": "101.0", "user": "UBOT", "bot_id": "B1", "text": "Drafted", "reply_count": 1, "latest_reply": "102.0"}
+        reply = {"ts": "102.0", "thread_ts": "101.0", "user": DOC, "text": f"CONFIRM {o['id']}"}
+        fake, _ = self.run_sync(conn, [parent, reply])
+        fake.conversations_history = lambda channel, limit=50, oldest=None: {"messages": [parent]}
+        self.run_sync(conn, [parent, reply])
+        self.assertNotEqual(db.one(conn.execute("SELECT status FROM orders WHERE id=?", (o["id"],)))["status"], "awaiting_signature")
 
     def test_other_users_and_bots_cannot_sign(self):
         conn = fresh()

@@ -104,6 +104,17 @@ def sync(conn, lock) -> list[str]:
                 conn.execute("INSERT OR REPLACE INTO kv VALUES (?,?)", (key, latest[0]["ts"]))
             continue
         msgs = client.conversations_history(channel=channel, oldest=cur["v"], limit=50).get("messages") or []
+        # Doctors often answer inside a thread (e.g. CONFIRM under the bot's draft). History lists only top-level
+        # messages, so also read new replies in recently active threads.
+        try:
+            recent = client.conversations_history(channel=channel, limit=20).get("messages") or []
+            for parent in recent:
+                if parent.get("reply_count") and float(parent.get("latest_reply") or 0) > float(cur["v"]):
+                    for r in (client.conversations_replies(channel=channel, ts=parent["ts"], limit=100).get("messages") or [])[1:]:
+                        if float(r["ts"]) > float(cur["v"]) and r["ts"] not in {m["ts"] for m in msgs}:
+                            msgs.append(r)
+        except Exception:  # noqa: BLE001 - thread scan is best effort
+            log.exception("thread scan failed")
         for m in sorted(msgs, key=lambda m: float(m["ts"])):
             if m.get("user") != prov["slack_user"] or m.get("bot_id"):
                 continue  # only the doctor's own messages count as signatures
@@ -121,7 +132,7 @@ def sync(conn, lock) -> list[str]:
                 conn.execute("INSERT OR REPLACE INTO kv VALUES (?,?)", (key, m["ts"]))
             if results:
                 done += results
-                client.chat_postMessage(channel=channel, thread_ts=m["ts"], text="Recorded: " + "; ".join(results))
+                client.chat_postMessage(channel=channel, thread_ts=m.get("thread_ts") or m["ts"], text="Recorded: " + "; ".join(results))
         if msgs:
             with lock:
                 newest = max(msgs, key=lambda m: float(m["ts"]))["ts"]
