@@ -202,3 +202,17 @@ class RecordedStoryData(unittest.TestCase):
         clinic.record_patient_reply(conn, "P-108", f"YES {bob['proposal_id']}")
         new = demo_story.bob_new_appointment(conn)
         self.assertEqual(db.one(conn.execute("SELECT provider_id FROM appointments WHERE id=?", (new,)))["provider_id"], "DR-PATEL")
+
+
+class OutageWording(unittest.TestCase):
+    def test_natural_phrasings_trigger_and_others_do_not(self):
+        from service.demo_story import OUTAGE_TEXT
+        yes = ["I'm out sick tomorrow, please reschedule my appointments", "I am sick, am out for tomorrow",
+               "I'm sick, can't come in tomorrow", "I'll be out tomorrow", "please reschedule my patients",
+               "I am unwell", "can't see patients today"]
+        no = ["Send Metformin 500 mg twice daily for patient Bob", "confirm", "release", "Bob is out of Metformin",
+              "patient feels sick after the dose"]
+        for t in yes:
+            self.assertTrue(OUTAGE_TEXT.search(t), t)
+        for t in no:
+            self.assertFalse(OUTAGE_TEXT.search(t), t)

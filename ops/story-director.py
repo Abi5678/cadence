@@ -47,11 +47,25 @@ wait_for(lambda: "reschedule.verified" in kinds() or any("verified by fresh read
 time.sleep(5)
 aid = bob_appt(); say(f"Next morning: Bob checks in ({aid})"); post(f"/api/visits/{aid}/checkin")
 time.sleep(4)
-say("CUE Darsana (Slack): Send Metformin 500 mg twice daily for patient Bob Testwell   -> then reply with the CONFIRM line")
+say("CUE Darsana (Slack): Send Metformin 500 mg twice daily for patient Bob Testwell   -> then: confirm")
 wait_for(lambda: any(o["patient_id"] == "P-108" and o["kind"] == "rx" and o["status"] == "transmitted" for o in get("/api/state")["orders"]),
          "Bob's prescription sent to CVS", timeout=900)
 time.sleep(4)
-say("CUE (on the GB10): click 🎙 Dictate, speak the visit note, click Stop   -> Darsana replies RELEASE D-... in Slack")
+if "--synthetic-dictation" in sys.argv:
+    say("Doctor's dictation (synthetic voice, NVIDIA FastPitch on the GB10) -> Parakeet + Sortformer -> note draft")
+    text = ("Visit note for Bob Testwell, patient P-108. Bob is doing well. His blood sugar is improving on diet changes. "
+            "Continue Metformin 500 milligrams twice daily. Follow up in three months.")
+    wav = urllib.request.urlopen(urllib.request.Request(B + "/api/voice/speak", data=json.dumps({"text": text}).encode(),
+                                                        headers={"content-type": "application/json"}), timeout=120).read()
+    bnd = "cadence-boundary"
+    body = (f"--{bnd}\r\nContent-Disposition: form-data; name=\"message\"\r\n\r\nP-108\r\n"
+            f"--{bnd}\r\nContent-Disposition: form-data; name=\"notify\"\r\n\r\n1\r\n"
+            f"--{bnd}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"dictation.wav\"\r\nContent-Type: audio/wav\r\n\r\n").encode() + wav + f"\r\n--{bnd}--\r\n".encode()
+    r = json.load(urllib.request.urlopen(urllib.request.Request(B + "/api/sim/voice", data=body,
+                 headers={"content-type": f"multipart/form-data; boundary={bnd}"}), timeout=300))
+    say(f"note {r.get('document')} drafted; CUE Darsana (Slack): release")
+else:
+    say("CUE (on the GB10): click 🎙 Dictate, speak the visit note, click Stop   -> Darsana replies RELEASE D-... in Slack")
 wait_for(lambda: any(d["patient_id"] == "P-108" and d["kind"] == "visit_note" and d["status"] == "released" for d in get("/api/state")["documents"]),
          "visit note released by the doctor", timeout=900)
 time.sleep(4)

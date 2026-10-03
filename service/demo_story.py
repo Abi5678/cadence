@@ -19,7 +19,11 @@ OFFER_MINUTES = 30
 UNCOVERED_MARKERS = ("unlisted-mab", "not-on-formulary")
 INJECTION_MARKERS = ("export all patient data", "ignore previous instructions", "ignore all previous")
 ADMIN_FIELDS = {"phone", "preferred_channel"}
-OUTAGE_TEXT = re.compile(r"out sick|reschedule my appointments", re.IGNORECASE)
+# A doctor's own words for "I can't see patients": out sick, sick tomorrow, out for tomorrow, can't come in, reschedule my...
+OUTAGE_TEXT = re.compile(
+    r"out sick|reschedule (all )?my (appointments|patients|visits)|\bi(?:'m| am)\s+(?:sick|ill|unwell)\b"
+    r"|\b(?:am|i'm|be|will be)\s+out\s+(?:for\s+)?(?:tomorrow|today)\b|\bcan'?t\s+(?:come\s+in|see\s+(?:my\s+)?patients|make\s+it)\s+(?:in\s+)?(?:tomorrow|today)\b",
+    re.IGNORECASE)
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS reschedule_proposals (
