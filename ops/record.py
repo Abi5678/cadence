@@ -15,7 +15,7 @@ proxy = Gio.DBusProxy.new_sync(bus, 0, None, "org.gnome.Shell.Screencast", "/org
 ok, path = proxy.call_sync("Screencast", GLib.Variant("(sa{sv})", (os.path.join(out_dir, name + ".webm"), {"framerate": GLib.Variant("i", 30)})), 0, -1, None).unpack()
 print("recording" if ok else "FAILED", path, flush=True)
 t0 = time.time()
-while not os.path.exists(stop) and time.time() - t0 < 900:  # 15 min safety cap
+while not os.path.exists(stop) and time.time() - t0 < 2400:  # 40 min safety cap
     time.sleep(0.5)
 proxy.call_sync("StopScreencast", None, 0, -1, None)
 os.remove(stop) if os.path.exists(stop) else None

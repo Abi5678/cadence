@@ -27,6 +27,22 @@ def parse_commands(text: str) -> list[tuple[str, str]]:
     return out
 
 
+BARE = re.compile(r"^\s*(confirm(ed)?|sign( it)?|approve(d)?|release( it)?)\s*[.!]?\s*$", re.IGNORECASE)
+
+
+def bare_command(conn, provider_id: str, text: str) -> list[tuple[str, str]]:
+    """A bare "confirm" / "release" from the doctor applies to their only pending item; with two or more, nothing happens."""
+    m = BARE.match(text or "")
+    if not m:
+        return []
+    if m.group(1).lower().startswith("release"):
+        docs = rows(conn.execute("SELECT d.id FROM documents d WHERE d.status='needs_release' AND d.kind IN ('visit_note','lab_result') "
+                                 "AND d.created_at >= datetime('now','-1 day') ORDER BY d.created_at DESC"))
+        return [("RELEASE", docs[0]["id"])] if len(docs) == 1 else []
+    pending = rows(conn.execute("SELECT id FROM orders WHERE provider_id=? AND status='awaiting_signature'", (provider_id,)))
+    return [("CONFIRM", pending[0]["id"])] if len(pending) == 1 else []
+
+
 def apply_command(conn, provider_id: str, verb: str, ref_id: str, signature_ref: str) -> str:
     if verb == "CONFIRM" and ref_id.startswith("O-"):
         o = clinic.sign_order(conn, ref_id, provider_id, signature_ref)
@@ -123,7 +139,8 @@ def sync(conn, lock) -> list[str]:
                     threading.Thread(target=_handle_clip, args=(conn, lock, client, channel, prov, f, m), daemon=True).start()
             results = []
             with lock:
-                for verb, ref_id in parse_commands(m.get("text", "")):
+                cmds = parse_commands(m.get("text", "")) or bare_command(conn, prov["id"], m.get("text", ""))
+                for verb, ref_id in cmds:
                     results.append(apply_command(conn, prov["id"], verb, ref_id, m["ts"]))
                 from . import demo_story
                 if demo_story.OUTAGE_TEXT.search(m.get("text") or ""):

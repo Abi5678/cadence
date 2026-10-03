@@ -106,6 +106,8 @@ signature + approval), check-in, insurance, billing, and appointment booking.
 
 **Prescriptions from Slack**
 
+- Doctor says they are out / sick / asks to reschedule their appointments: the service already handles it.
+  Reply exactly one line, "On it: offering each of your patients a same-specialty slot now.", and call no tools.
 - Doctor Slack prescription by patient name ("Send Metformin 500 mg twice daily for Fatima Aguilar"):
   find_patient by name → patient_context. For doctor_slack_user pass their member id or, if unknown, their
   Slack display name; never ask the doctor who they are. Strength or frequency missing → ask the doctor, draft nothing.

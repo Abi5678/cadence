@@ -150,3 +150,17 @@ class PrescriberSignedRx(unittest.TestCase):
         with mock.patch.dict(os.environ, {"CADENCE_SEND_PRESCRIBER_SIGNED_RX": "1"}):
             clinic.sign_order(conn, o["id"], "DR-CHEN", "103.0")
         self.assertEqual(db.one(conn.execute("SELECT status FROM orders WHERE id=?", (o["id"],)))["status"], "coverage_review")
+
+
+class BareConfirm(unittest.TestCase):
+    def test_bare_confirm_signs_the_only_pending_draft(self):
+        conn = fresh()
+        o = clinic.draft_doctor_order(conn, DOC, "P-104", "lab", "CBC")
+        self.assertEqual(slack_sync.bare_command(conn, "DR-CHEN", "confirm"), [("CONFIRM", o["id"])])
+        self.assertEqual(slack_sync.bare_command(conn, "DR-CHEN", "please confirm the dose first"), [])
+
+    def test_bare_confirm_with_two_drafts_does_nothing(self):
+        conn = fresh()
+        clinic.draft_doctor_order(conn, DOC, "P-104", "lab", "CBC")
+        clinic.draft_doctor_order(conn, DOC, "P-104", "lab", "Lipid panel")
+        self.assertEqual(slack_sync.bare_command(conn, "DR-CHEN", "Confirm"), [])
