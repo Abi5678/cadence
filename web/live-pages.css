@@ -1,0 +1,43 @@
+/* Live clinic pages inside the coordinator workspace. Same Weave tokens; scoped to .live-page. */
+.nav-divider{display:block;margin:18px 16px 4px;font-size:11px;letter-spacing:1.2px;color:var(--muted)}
+.live-page h1{font-family:var(--serif);font-weight:400;font-size:clamp(30px,3.2vw,44px);line-height:1.15;margin:0 0 10px}
+.live-page .lede{color:#737789;margin:0 0 24px;max-width:860px;line-height:1.6}
+.live-page .grid{display:grid;gap:18px;grid-template-columns:repeat(auto-fit,minmax(320px,1fr))}
+.live-page .card{background:#fffefa;border:1px solid #dcdce3;border-radius:16px;padding:18px 20px;min-width:0;overflow-x:auto}
+.live-page .card h2{font-family:var(--serif);font-weight:400;font-size:21px;margin:0 0 12px;display:flex;gap:10px;align-items:baseline}
+.live-page .card h2 small{font-family:var(--sans);font-size:12px;color:var(--muted)}
+.live-page table{width:100%;border-collapse:collapse;font-size:13.5px}
+.live-page th{text-align:left;font-weight:500;color:var(--muted);font-size:12px;padding:6px 8px;border-bottom:1px solid var(--line)}
+.live-page td{padding:8px;border-bottom:1px solid #eeeef0;vertical-align:top;overflow-wrap:anywhere}
+.live-page tr:last-child td{border-bottom:0}
+.live-page .nowrap{white-space:nowrap;overflow-wrap:normal}
+.live-page .pill{display:inline-block;font-size:11.5px;padding:2px 8px;border-radius:20px;background:#eeeef2;color:#545b72;white-space:nowrap;margin:1px 0}
+.live-page .pill.good{background:#e5f2ea;color:#2d6a45}.live-page .pill.warn{background:#fbf0dc;color:#7a5413}.live-page .pill.bad{background:#f8e3e3;color:#8a2c2c}.live-page .pill.iris{background:var(--iris-pale);color:var(--iris-deep)}
+.live-page .row-actions{display:flex;gap:6px;flex-wrap:wrap}
+.live-page .row-actions button,.live-page .mini{font-size:12.5px;padding:5px 10px;border-radius:6px}
+.live-page button.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+.live-page button.approve{background:#2d6a45;color:#fff;border-color:#2d6a45}
+.live-page .approval{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;padding:12px 0;border-bottom:1px solid #eeeef0}
+.live-page .approval:last-child{border-bottom:0}.live-page .approval .what{font-weight:500}.live-page .approval .meta{font-size:12px;color:var(--muted)}
+.live-page .approval pre{white-space:pre-wrap;font:12px/1.5 var(--sans);color:var(--body);background:#f6f6f2;border-radius:8px;padding:8px 10px;margin:6px 0 0}
+.live-page .empty{color:var(--muted);font-size:14px;padding:10px 0}
+.live-page .feed{list-style:none;margin:0;padding:0;font-size:13px;max-height:560px;overflow:auto}
+.live-page .feed li{display:grid;grid-template-columns:62px 1fr;gap:8px;padding:6px 0;border-bottom:1px solid #f0f0f2}
+.live-page .feed time{color:var(--muted);font-size:12px}.live-page .feed .k{font-size:11px;color:var(--iris-deep)}
+.live-page .composer{display:flex;gap:10px;margin:0 0 18px;flex-wrap:wrap;align-items:center}
+.live-page .composer input{flex:1;min-width:180px;border:1px solid var(--line);border-radius:10px;padding:11px 14px;background:#fff}
+.live-page form.inline{display:grid;gap:8px;grid-template-columns:1fr 1fr}.live-page form.inline .full{grid-column:1/-1}
+.live-page form.inline input,.live-page form.inline select{border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:#fff;min-width:0}
+.live-page .footnote{font-size:12px;color:var(--muted)}
+.live-split{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:20px;align-items:start}
+.phone-card{position:sticky;top:20px;border-radius:26px!important;display:flex;flex-direction:column;gap:10px}
+.phone-card select{border:1px solid var(--line);border-radius:8px;padding:7px}
+.phone-card .phone-thread{height:340px;overflow:auto;display:flex;flex-direction:column;gap:8px;background:#fafaf8;border-radius:12px;padding:10px}
+.phone-card .bubble{max-width:85%;padding:8px 11px;border-radius:15px;font-size:13px;line-height:1.45;overflow-wrap:anywhere}
+.phone-card .bubble.out{background:#ececf1;align-self:flex-start;border-bottom-left-radius:4px}
+.phone-card .bubble.in{background:var(--iris);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
+.phone-card .bubble time{display:block;font-size:10.5px;opacity:.7;margin-top:3px}
+.phone-card .phone-quick{display:flex;gap:6px}.phone-card .phone-quick button{flex:1;font-size:12px;padding:7px 4px}
+.phone-card .phone-form{display:flex;gap:6px}.phone-card .phone-form input{flex:1;border:1px solid var(--line);border-radius:20px;padding:8px 12px;min-width:0}
+@media (max-width:1100px){.live-split{grid-template-columns:1fr}.phone-card{position:static}}
+@media (max-width:760px){.live-page form.inline{grid-template-columns:1fr}}
