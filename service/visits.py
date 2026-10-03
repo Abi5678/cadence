@@ -59,7 +59,7 @@ def extract(asr: dict, hint: str = "") -> tuple[dict, float]:
     t0 = time.time()
     r = httpx.post(f"{VLLM_URL}/chat/completions", timeout=300, json={
         "model": VLLM_MODEL, "temperature": 0.1, "max_tokens": 1500,
-        "response_format": {"type": "json_object"},
+        # No response_format: vLLM's structured-output mode hung the engine on this build. Parse JSON from text instead.
         "chat_template_kwargs": {"enable_thinking": False},
         "messages": [{"role": "system", "content": EXTRACT_PROMPT},
                      {"role": "user", "content": f"Doctor's message with the clip: {hint or '(none)'}\n\nTranscript:\n{lines}"}]})

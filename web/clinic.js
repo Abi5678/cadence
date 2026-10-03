@@ -69,6 +69,36 @@
         <input name="detail" required placeholder="e.g. Lipid panel, fasting" class="full"><button class="primary">Sign &amp; submit</button></form></section>
       <section class="card"><h2>Doctor ⇄ Cadence in Slack</h2><ul class="feed">${S.messages.filter(m => m.channel.startsWith('slack')).map(m => `<li><time>${tm(m.created_at)}</time><div>${esc(m.body)}${m.channel === 'slack-preview' ? ' ' + pill('preview') : ''}</div></li>`).join('') || '<li class="empty">No Slack messages yet. DM the Cadence bot as the doctor.</li>'}</ul></section></div>`;
     },
+    voice() {
+      const recs = S.recordings || [];
+      return `<h1>Voice visits</h1><p class="lede">Doctors send a Slack voice clip after a visit. On this GB10, NVIDIA Parakeet transcribes it and Sortformer separates the speakers; the local model drafts the note, orders and follow-up for the doctor to sign. Nothing is signed or sent automatically.</p>
+      <form class="composer" id="voice-form"><input type="file" name="file" accept="audio/*,video/*" required><input name="message" placeholder="Patient ID, e.g. P-104" style="max-width:220px"><button class="primary">Transcribe on GB10</button></form>
+      ${recs.map(r => { const roles = (r.extraction || {}).roles || {}; return `<section class="card" style="margin-bottom:16px"><h2>${esc(r.patient_id || 'Unknown patient')} <small>${esc(r.id)} · ${tm(r.created_at)} · ${pill(r.status)} · ${r.duration_s ? esc(r.duration_s) + 's audio' : ''} ${r.timings && r.timings.asr_s ? `· ASR ${esc(r.timings.asr_s)}s · diarization ${esc(r.timings.diarization_s)}s · note ${esc(r.timings.llm_s)}s` : ''}</small></h2>
+        ${(r.extraction || {}).summary ? `<p>${esc(r.extraction.summary)}</p>` : ''}
+        <ul class="feed">${(r.segments || []).map(g => `<li><time>${Number(g.start).toFixed(1)}s</time><div><span class="k">${esc((roles[g.speaker] || g.speaker).toUpperCase())}</span><br>${esc(g.text)}</div></li>`).join('')}</ul></section>`; }).join('') || '<p class="empty">No recordings yet. Send a voice clip to the Cadence bot in Slack, or upload one above.</p>'}`;
+    },
+    ccm() {
+      const c = S.ccm; if (!c) return '<p class="empty">Loading…</p>';
+      const usd = n => '$' + Number(n || 0).toFixed(2);
+      const ready = c.packets.filter(k => k.status === 'needs_review');
+      return `<h1>Chronic care &amp; billing</h1><p class="lede">Cadence watches ${c.monitored.length} chronic-care patients around the clock and audits each month for CCM (99490/99439) and remote monitoring (99454/99457/99458). Only human staff time is billable; the agent's own work is logged and excluded. You review, the doctor attests in Slack, then the claim goes to Medicare (mock).</p>
+      <div class="composer"><button class="primary" id="ccm-close">Run month-end close for ${esc(c.month)}</button><span class="pill iris">${ready.length} packets ready · ${usd(ready.reduce((a, k) => a + k.result.billed, 0))}</span></div>
+      <div class="grid"><section class="card" style="grid-column:1/-1"><h2>Audit packets <small>${esc(c.month)}</small></h2><table><tr><th>Patient</th><th>Codes</th><th>Checks</th><th>Agent work (not billed)</th><th>Status</th><th></th></tr>
+      ${c.packets.map(k => { const r = k.result; return `<tr><td>${esc(r.patient)}<br><small>${esc(k.patient_id)}</small></td>
+        <td>${r.codes.map(x => `${esc(x.code)}${x.units > 1 ? '×' + x.units : ''}`).join(', ') || '—'}<br><strong>${usd(r.billed)}</strong></td>
+        <td>${r.checks.map(x => `<span class="pill ${x.ok ? 'good' : 'bad'}" title="${esc(x.detail)}">${x.ok ? '✓' : '✗'} ${esc(x.check)}</span>`).join(' ')}</td>
+        <td><small>${esc(r.agent.actions)} actions / ${esc(r.agent.minutes)} min</small></td><td>${pill(k.status)}</td>
+        <td class="row-actions">${k.status === 'needs_review' ? `<button class="approve" data-kreview="${esc(k.id)}">Approve</button><button data-kreturn="${esc(k.id)}">Return</button>` : ''}${k.status === 'awaiting_attestation' ? `<small>waiting for doctor CONFIRM ${esc(k.id)}</small><button class="mini" data-kattest="${esc(k.id)}">Attest (demo)</button>` : ''}</td></tr>`; }).join('') || '<tr><td colspan="6" class="empty">No packets yet. Run month-end close.</td></tr>'}</table></section>
+      <section class="card"><h2>Medicare claims <small>mock MAC</small></h2><table><tr><th>Claim</th><th>Billed</th><th>Status</th><th>Paid</th></tr>
+      ${c.claims.map(x => `<tr><td>${esc(x.id)}<br><small>${esc(x.patient_id)} · ${esc(x.receipt)}</small></td><td>${usd(x.billed)}</td><td>${pill(x.status)}</td><td>${x.remit ? usd(JSON.parse(x.remit).paid) : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">None yet</td></tr>'}</table></section>
+      <section class="card"><h2>At risk this month</h2><table><tr><th>Patient</th><th>Needs</th></tr>
+      ${c.gaps.slice(0, 12).map(g => `<tr><td>${esc(g.name)}<br><small>${esc(g.patient_id)}</small></td><td>${g.needs.map(esc).join('; ')}</td></tr>`).join('')}</table></section>
+      <section class="card"><h2>Log care time <small>human staff only</small></h2><form class="inline" id="time-form">
+        <select name="patient_id">${c.monitored.map(m => `<option value="${esc(m.patient_id)}">${esc(m.name)}</option>`).join('')}</select>
+        <select name="staff_id"><option value="S-6">Jamie (CCM nurse)</option><option value="S-1">Sam (RN)</option><option value="S-2">Lee (RN)</option></select>
+        <select name="program"><option value="ccm">CCM care management</option><option value="rpm">RPM interactive</option></select>
+        <input name="minutes" type="number" min="1" max="120" value="10" required><input name="activity" class="full" required placeholder="e.g. Phone call: reviewed glucose log and meds"><button class="primary">Log time</button></form></section></div>`;
+    },
     docs() {
       const docs = S.documents, cons = S.consents;
       const c = (pid, k) => (cons.find(x => x.patient_id === pid && x.kind === k) || {}).granted;
@@ -126,7 +156,10 @@
     renderPhone();
   }
 
-  async function refresh() { S = await call('/api/state'); render(); }
+  async function refresh() {
+    const [st, cc, rec] = await Promise.all([call('/api/state'), call('/api/ccm').catch(() => null), call('/api/recordings').catch(() => [])]);
+    S = { ...st, ccm: cc, recordings: rec }; render();
+  }
   async function health() {
     try {
       const h = await call('/api/health');
@@ -141,6 +174,10 @@
     else if (d.reject) act(() => call(`/api/approvals/${d.reject}/decide`, { approve: false }), 'Rejected');
     else if (d.checkin) act(() => call(`/api/visits/${d.checkin}/checkin`, {}), 'Checked in, eligibility verified');
     else if (d.complete) act(() => call(`/api/visits/${d.complete}/complete`, {}), 'Visit completed, claim drafted');
+    else if (d.kreview) act(() => call(`/api/ccm/packets/${d.kreview}/review`, { approve: true }), 'Approved; doctor asked to attest in Slack');
+    else if (d.kreturn) act(() => call(`/api/ccm/packets/${d.kreturn}/review`, { approve: false }), 'Returned for correction');
+    else if (d.kattest) act(() => call(`/api/ccm/packets/${d.kattest}/attest`, {}), 'Attested; claim submitted');
+    else if (b.id === 'ccm-close') act(() => call('/api/ccm/close', {}), 'Month-end close assigned to Cadence');
     else if (d.senddoc) act(() => call(`/api/documents/${d.senddoc}/send`, {}), 'Queued for approval');
     else if (d.phone) { phonePatient = d.phone; renderPhone(); }
     else if (d.reply) sendReply(d.reply);
@@ -152,8 +189,13 @@
     if (f.id === 'vitals-form') act(() => call('/api/sim/vitals', { ...v, value: Number(v.value) }), 'Reading recorded');
     else if (f.id === 'order-form') act(() => call('/api/sim/doctor-order', v), 'Signed order received');
     else if (f.id === 'task-form') act(() => call('/api/tasks', { title: v.title, brief: v.title }), 'Task assigned to Cadence');
+    else if (f.id === 'time-form') act(() => call('/api/ccm/time', { ...v, minutes: Number(v.minutes), interactive: v.program === 'rpm' }), 'Time logged');
+    else if (f.id === 'voice-form') {
+      const fd = new FormData(f); toast('Transcribing on the GB10…');
+      fetch('/api/sim/voice', { method: 'POST', body: fd }).then(r => r.json()).then(() => { toast('Visit draft ready'); refresh(); }).catch(e => toast(e.message));
+    }
     else if (f.id === 'phone-form') { const i = $('#phone-input'); if (i.value.trim()) { sendReply(i.value.trim()); i.value = ''; } }
-    if (f.id !== 'phone-form') f.reset();
+    if (!['phone-form', 'voice-form'].includes(f.id)) f.reset();
   });
   document.addEventListener('change', e => {
     const c = e.target.closest('input[data-consent]'); if (!c) return;

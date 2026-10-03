@@ -10,6 +10,25 @@ import time
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 
+
+def _cpu_stft_patch():
+    """cuFFT in this torch build fails on the GB10 (error 50) for torch.stft. Spectrograms are cheap, so compute
+    the STFT on the Grace CPU and move the result back; the Parakeet/Sortformer networks still run on the GPU."""
+    import torch
+    if getattr(torch.stft, "_cadence_cpu", False):
+        return
+    orig = torch.stft
+
+    def stft(input, *args, **kwargs):
+        if input.is_cuda:
+            dev = input.device
+            args = tuple(a.cpu() if torch.is_tensor(a) else a for a in args)
+            kwargs = {k: (v.cpu() if torch.is_tensor(v) else v) for k, v in kwargs.items()}
+            return orig(input.cpu(), *args, **kwargs).to(dev)
+        return orig(input, *args, **kwargs)
+    stft._cadence_cpu = True
+    torch.stft = stft
+
 ASR_MODEL = os.environ.get("ASR_MODEL", "nvidia/parakeet-tdt-0.6b-v2")
 DIAR_MODEL = os.environ.get("DIAR_MODEL", "nvidia/diar_streaming_sortformer_4spk-v2")
 MAX_BYTES = 50 * 1024 * 1024
@@ -20,6 +39,7 @@ _models: dict = {}
 
 def models():
     if not _models:
+        _cpu_stft_patch()
         import nemo.collections.asr as nemo_asr
         from nemo.collections.asr.models import SortformerEncLabelModel
         t0 = time.time()
