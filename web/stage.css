@@ -1,0 +1,29 @@
+/* One screen: assign a task, watch Weaver act it out. */
+body.stage{margin:0;min-height:100vh;background:var(--pearl,#F7F7F3);color:var(--ink,#202B46)}
+.stage-shell{display:grid;grid-template-columns:minmax(320px,1fr) minmax(340px,440px);min-height:100vh}
+.stage-main{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:36px 28px 48px;text-align:center}
+.stage-kicker{font-size:12px;letter-spacing:1.6px;text-transform:uppercase;color:var(--muted,#817B91);margin:0 0 8px}
+.stage-main h1{font-family:var(--serif);font-weight:400;font-size:clamp(32px,4vw,48px);margin:0}
+.stage-mascot{margin:18px 0 8px;width:280px;height:360px;display:grid;place-items:center}
+.stage-mascot .weaver-pose{width:240px}
+.stage-action{font-family:var(--serif);font-size:26px;margin:8px 0 4px;max-width:520px}
+.stage-detail{color:var(--muted,#817B91);max-width:460px;min-height:2.6em}
+.stage-side{border-left:1px solid var(--line,#E5E2ED);background:#FCFBF7;display:flex;flex-direction:column;padding:22px 22px 18px}
+.stage-side h2{font-family:var(--serif);font-weight:400;font-size:28px;margin:0 0 6px}
+.stage-side .lede{color:var(--muted,#817B91);margin:0 0 14px}
+.stage-form textarea{width:100%;border:1px solid var(--line,#E5E2ED);border-radius:12px;padding:12px 14px;background:#fff;resize:vertical;font:inherit}
+.stage-form button.primary{margin-top:10px;background:var(--ink,#202B46);color:#fff;border:0;border-radius:10px;padding:11px 16px;width:100%}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 16px}
+.chips button{border:1px solid var(--line,#E5E2ED);background:#fff;border-radius:999px;padding:6px 10px;font-size:13px;color:var(--ink,#202B46)}
+.chips button:hover{border-color:#7775D8;color:#625ccd}
+.feed{list-style:none;margin:0;padding:0;overflow:auto;flex:1}
+.feed li{display:grid;grid-template-columns:72px 1fr;gap:8px;padding:8px 0;border-bottom:1px solid #f0eef4;font-size:13.5px}
+.feed time{color:var(--muted,#817B91);font-size:12px}
+.feed .k{color:#625ccd;font-size:11px}
+.tasks{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;max-height:160px;overflow:auto}
+.tasks button{text-align:left;border:1px solid var(--line,#E5E2ED);background:#fff;border-radius:10px;padding:8px 10px;font-size:13px}
+.tasks button.on{border-color:#7775D8;background:#f4f3fb}
+.tasks small{display:block;color:var(--muted,#817B91)}
+.back{font-size:13px;color:#625ccd;text-decoration:none}
+.stage-error{color:#8a2c2c;min-height:1.2em;font-size:13px}
+@media(max-width:900px){.stage-shell{grid-template-columns:1fr}.stage-side{border-left:0;border-top:1px solid var(--line,#E5E2ED)}.stage-mascot{height:280px}.stage-mascot .weaver-pose{width:180px}}

@@ -168,13 +168,22 @@ class DoctorSlackOrders(unittest.TestCase):
         o = clinic.draft_doctor_order(self.conn, "UDOC", "P-104", "rx", "Amoxi-synth 500 mg BID x7d")
         self.assertEqual(o["status"], "awaiting_signature")
         self.assertIsNone(o["signed_by"])
+        self.assertTrue(o.get("task_id"))
+        task = clinic.get_task(self.conn, o["task_id"])
+        self.assertEqual(task["kind"], "doctor_order")
+        self.assertEqual(task["status"], "waiting")
+        o2 = clinic.draft_doctor_order(self.conn, "UDOC", "P-104", "lab", "CBC")
+        self.assertEqual(o2["task_id"], o["task_id"])  # same long-running task
         with self.assertRaises(clinic.ClinicError):
             clinic.route_order(self.conn, o["id"])  # agent cannot route an unsigned draft
         cmds = slack_sync.parse_commands(f"confirm {o['id'].lower()} thanks")
         self.assertEqual(cmds, [("CONFIRM", o["id"])])
         slack_sync.apply_command(self.conn, "DR-CHEN", "CONFIRM", o["id"], "1700000000.0001")
-        o2 = db.one(self.conn.execute("SELECT * FROM orders WHERE id=?", (o["id"],)))
-        self.assertEqual((o2["status"], o2["signed_by"], o2["signature_ref"]), ("pending_approval", "DR-CHEN", "1700000000.0001"))
+        o3 = db.one(self.conn.execute("SELECT * FROM orders WHERE id=?", (o["id"],)))
+        self.assertEqual((o3["status"], o3["signed_by"], o3["signature_ref"]), ("pending_approval", "DR-CHEN", "1700000000.0001"))
+        ap = db.one(self.conn.execute("SELECT * FROM approvals WHERE dedupe_key=?", (f"route:{o['id']}",)))
+        self.assertEqual(ap["task_id"], o["task_id"])
+        self.assertEqual(clinic.get_task(self.conn, o["task_id"])["status"], "review")
 
     def test_other_provider_cannot_sign(self):
         o = clinic.draft_doctor_order(self.conn, "UDOC", "P-104", "lab", "Lipid panel")

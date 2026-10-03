@@ -112,7 +112,8 @@ def process_clip(conn, provider_id: str, doctor_slack_user: str, file: dict, aud
             for o in (ex.get("orders") or [])[:6]:
                 if o.get("kind") in ("rx", "lab") and o.get("detail"):
                     try:
-                        created["orders"].append(clinic.draft_doctor_order(conn, doctor_slack_user, patient_id, o["kind"], o["detail"])["id"])
+                        created["orders"].append(clinic.draft_doctor_order(
+                            conn, doctor_slack_user, patient_id, o["kind"], o["detail"], notify=False)["id"])
                     except clinic.ClinicError as e:
                         out_lines.append(f"Could not draft order ({e}).")
             fu = ex.get("follow_up")
@@ -126,14 +127,5 @@ def process_clip(conn, provider_id: str, doctor_slack_user: str, file: dict, aud
                                  "management. Front desk will ask for the patient's consent.")
         emit(conn, None, "voice.drafted", "agent", f"{rid}: note draft for {patient_id or 'unknown patient'}, {len(created['orders'])} order(s)",
              {"recording_id": rid, "timings": timings})
-    speakers = ", ".join(f"{k}={v}" for k, v in roles.items())
-    head = (f"*Visit draft for {patient_id}* ({asr.get('duration_s')}s, {asr['speakers']} speakers: {speakers})\n{ex.get('summary', '')}"
-            if patient_id else f"*Visit transcribed* ({asr['speakers']} speakers) but I couldn't tell which patient. "
-                               "Reply with the patient ID (e.g. P-104) and send the clip again.")
-    if created["orders"]:
-        out_lines.insert(0, f"Drafted orders: {', '.join(created['orders'])}. Reply `CONFIRM {' '.join(created['orders'])}` to sign.")
-    if created["document"]:
-        out_lines.append(f"Note draft *{created['document']}*: reply `RELEASE {created['document']}` after review.")
-    out_lines.append(f"_GB10 timings: ASR {timings['asr_s']}s, diarization {timings['diarization_s']}s, note {timings['llm_s']}s._")
-    reply(head + "\n" + "\n".join(out_lines))
+    reply("Notes ready for review.")
     return {"recording_id": rid, "patient_id": patient_id, **created, "timings": timings}

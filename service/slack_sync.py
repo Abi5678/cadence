@@ -114,6 +114,10 @@ def sync(conn, lock) -> list[str]:
             with lock:
                 for verb, ref_id in parse_commands(m.get("text", "")):
                     results.append(apply_command(conn, prov["id"], verb, ref_id, m["ts"]))
+                from . import demo_story
+                if demo_story.OUTAGE_TEXT.search(m.get("text") or ""):
+                    outage = demo_story.handle_provider_outage(conn, prov["id"], m.get("text") or "", m["ts"])
+                    results.append(f"outage {outage.get('task_id') or outage.get('duplicate')}")
                 conn.execute("INSERT OR REPLACE INTO kv VALUES (?,?)", (key, m["ts"]))
             if results:
                 done += results

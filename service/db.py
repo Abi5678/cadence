@@ -122,9 +122,10 @@ def connect(path: Path | str | None = None) -> sqlite3.Connection:
     conn = sqlite3.connect(p, check_same_thread=False, isolation_level=None)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
-    from . import ccm, visits
+    from . import ccm, demo_story, visits
     ccm.ensure_schema(conn)
     visits.ensure_schema(conn)
+    demo_story.ensure_schema(conn)
     return conn
 
 

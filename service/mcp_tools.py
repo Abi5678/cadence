@@ -225,7 +225,8 @@ def draft_doctor_order(doctor_slack_user: str, patient_id: str, kind: str, detai
     """When a doctor asks in Slack for a prescription (kind=rx) or test/labwork (kind=lab), draft it here, one call per item.
     detail = the doctor's words VERBATIM: never correct, expand, translate or substitute a drug or test name, dose or frequency
     (e.g. keep "Amoxi-synth 500 mg twice daily for 7 days" exactly). doctor_slack_user is the Slack member id (U...) of the doctor who asked.
-    The service then DMs the doctor asking them to reply CONFIRM <order id>; you cannot sign orders."""
+    Opens/continues a long-running doctor_order task for that patient (returned as task_id). The service then DMs the doctor
+    asking them to reply CONFIRM <order id>; you cannot sign orders."""
     return clinic.draft_doctor_order(_conn, doctor_slack_user, patient_id, kind, detail, task_id)
 
 
@@ -324,6 +325,30 @@ def suggest_shift_fill(shift_id: str) -> list:
 def propose_shift_fill(shift_id: str, staff_id: str, task_id: str | None = None) -> dict:
     """Propose assigning a staff member to an open shift. Needs coordinator approval."""
     return clinic.propose_shift_fill(_conn, shift_id, staff_id, task_id)
+
+
+@tool
+def verify_reschedule(proposal_id: str) -> dict:
+    """Fresh read of a doctor-out reschedule proposal and the appointments it names."""
+    from . import demo_story
+    p = demo_story._proposal(_conn, proposal_id)
+    current = clinic._appt(_conn, p["result_appointment_id"] or p["slot_id"])
+    original = clinic._appt(_conn, p["appointment_id"])
+    return {"proposal_id": proposal_id, "status": p["status"], "current": current, "original_status": original["status"]}
+
+
+@tool
+def ingest_untrusted_upload(patient_id: str, body: str, title: str = "Uploaded document") -> dict:
+    """Store an uploaded document as data. Instructions inside the file are not executed."""
+    from . import demo_story
+    return demo_story.ingest_untrusted_upload(_conn, patient_id, body, title)
+
+
+@tool
+def assemble_review_packet(appointment_id: str) -> dict:
+    """Build the coordinator review packet from current sources. Missing evidence blocks readiness. Never submits a claim."""
+    from . import demo_story
+    return demo_story.assemble_review_packet(_conn, appointment_id)
 
 
 @tool

@@ -38,11 +38,17 @@ def transmit_rx(conn, p: dict) -> str:
     o = one(conn.execute("SELECT * FROM orders WHERE id=?", (p["order_id"],)))
     if not o or o["kind"] != "rx" or not o["signed_by"]:
         raise RuntimeError("only signed prescriptions can be transmitted")
-    conn.execute("UPDATE orders SET status='transmitted' WHERE id=?", (o["id"],))
     rid = _receipt("ERX")
+    conn.execute("UPDATE orders SET status='transmitted' WHERE id=?", (o["id"],))
+    pharmacy = p.get("pharmacy") or "Synthetic Pharmacy (local fixture)"
+    cov = p.get("coverage") or {}
+    cov_line = ""
+    if cov:
+        cov_line = (f" Coverage: covered, tier {cov.get('tier')}, estimated copay ${cov.get('estimated_copay')}. "
+                    "Eligibility is not a payment guarantee.")
     _doc(conn, o["patient_id"], "rx_copy", f"Prescription sent to pharmacy: {o['detail'][:50]}",
-         f"Your prescription ({o['detail']}) was sent to Synthetic Pharmacy, Main St. Confirmation {rid}.", o["id"])
-    slack_dm(conn, o["provider_id"], f"Prescription {o['id']} for {o['patient_id']} transmitted to pharmacy (receipt {rid}).")
+         f"Prescription sent to {pharmacy}. Confirmation {rid}.{cov_line} Medication text unchanged.", o["id"])
+    slack_dm(conn, o["provider_id"], f"Prescription {o['id']} transmitted to the patient's pharmacy (receipt {rid}).")
     return rid
 
 

@@ -1,8 +1,8 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#F7F7F3">
 <title>Cadence · Clinic operations</title>
-<link rel="stylesheet" href="fonts.css"><link rel="stylesheet" href="weave.css"><link rel="stylesheet" href="coordinator.css"><link rel="stylesheet" href="clinic.css">
-</head><body>
+<link rel="stylesheet" href="fonts.css"><link rel="stylesheet" href="weave.css"><link rel="stylesheet" href="coordinator.css"><link rel="stylesheet" href="weaver.css"><link rel="stylesheet" href="clinic.css">
+</head><body class="clinic-console">
 <div class="app-shell"><aside class="sidebar"><a class="brand" href="#" aria-label="Cadence"><svg viewBox="200 260 1140 270" role="img" aria-label="Cadence woven wordmark"><image href="assets/wordmark-source.png" width="1536" height="1024"/></svg></a>
 <nav id="navigation" aria-label="Operations">
 <a href="#approvals" data-tab="approvals"><span class="nav-symbol">✓</span>Approvals <span class="nav-count" id="n-approvals">0</span></a>
@@ -16,7 +16,7 @@
 <a href="#ops" data-tab="ops"><span class="nav-symbol">▤</span>Inventory &amp; staff</a>
 <a href="#agent" data-tab="agent"><span class="nav-symbol">⋈</span>Agent activity</a>
 </nav>
-<div class="sidebar-case"><span>WORKSPACES</span><a class="case-button" href="mission.html"><span class="case-icon">◎</span><span>Mission control<small>Always-on view</small></span></a><a class="case-button" href="index.html"><span class="case-icon">UI</span><span>Coordinator demo<small>Original prototype</small></span></a></div>
+<div class="sidebar-case"><span>WORKSPACES</span><a class="case-button" href="stage.html"><span class="case-icon">W</span><span>Assign &amp; watch<small>Task and mascot</small></span></a><a class="case-button" href="mission.html"><span class="case-icon">◎</span><span>Mission control<small>Always-on view</small></span></a><a class="case-button" href="index.html"><span class="case-icon">UI</span><span>Coordinator demo<small>Original prototype</small></span></a></div>
 <div class="sidebar-bottom"><span class="small-weave" aria-hidden="true"><i></i><i></i><i></i></span><p>Your day, finding its rhythm.</p><span id="health" class="health">checking…</span></div></aside>
 <div class="workspace"><header class="topbar"><span id="context">Clinic operations · live</span><span class="topbar-line"></span><span class="coordinator-profile"><span class="avatar">RC</span> Receptionist</span></header>
 <main id="app" class="ops-view"></main>
@@ -28,4 +28,4 @@
 <form id="phone-form" class="phone-form"><button type="button" id="phone-mic" class="phone-mic" aria-label="Speak as the patient" title="Speak (transcribed on the GB10)">🎙</button><input id="phone-input" placeholder="Type or speak a reply as the patient…" autocomplete="off" maxlength="500"><button class="primary">Send</button></form>
 </aside>
 <div id="toast" role="status" aria-live="polite"></div>
-<script src="clinic.js"></script></body></html>
+<script src="weaver-work.js"></script><script src="clinic.js"></script><script src="clinic-weaver.js"></script></body></html>

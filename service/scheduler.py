@@ -42,14 +42,41 @@ def run_sweep(conn, runner) -> dict:
 
 
 def on_event(conn, runner):
-    """Event triggers: patient replies wake the agent immediately."""
+    """Event triggers: patient replies and signed doctor orders wake the agent immediately."""
     def handle(ev: dict) -> None:
         if ev["kind"] == "patient.reply":
             pid = ev["data"]["patient_id"]
-            t = clinic.create_task(conn, "patient_reply", f"Patient {pid} replied",
-                                   f"Patient {pid} sent: \"{ev['summary']}\". Read patient_context({pid}) and act on their intent.",
+            bound = ev["data"].get("reschedule")
+            if bound:
+                brief = (f"Patient {pid} reply was bound to proposal {bound.get('proposal_id')} "
+                         f"({bound.get('status')}). Verify the schedule with a fresh read. Do not book or cancel again.")
+            else:
+                brief = f"Patient {pid} sent: \"{ev['summary']}\". Read patient_context({pid}) and act on their intent."
+            t = clinic.create_task(conn, "patient_reply", f"Patient {pid} replied", brief,
                                    dedupe_key=f"reply:{ev['data']['message_id']}")
             runner.wake(t["id"])
+        elif ev["kind"] == "order.signed" and ev.get("task_id"):
+            # Continue the long-running doctor_order task: confirm routing, then finish when queued.
+            oid = (ev.get("data") or {}).get("order_id") or "?"
+            with mcp_tools.LOCK:
+                clinic.set_task_status(
+                    conn, ev["task_id"], "running",
+                    f"{oid} signed. Confirm list_orders shows it pending_approval, post a one-line status, "
+                    f"and finish_task if no other drafts for this patient are still awaiting_signature.")
+            runner.wake(ev["task_id"])
+        elif ev["kind"] == "approval.confirmed" and ev.get("task_id"):
+            with mcp_tools.LOCK:
+                t = clinic.get_task(conn, ev["task_id"])
+                if t.get("kind") != "doctor_order":
+                    return
+                pid = (t.get("title") or "").removeprefix("Doctor orders for ").strip() or None
+                awaiting = []
+                if pid:
+                    awaiting = [o["id"] for o in clinic.list_orders(conn) if o["patient_id"] == pid and o["status"] == "awaiting_signature"]
+                open_aps = [a for a in t.get("approvals") or [] if a["state"] == "prepared"]
+                if not awaiting and not open_aps and t["status"] != "completed":
+                    clinic.set_task_status(conn, ev["task_id"], "completed",
+                                          "All signed orders for this patient are transmitted or queued.")
     return handle
 
 

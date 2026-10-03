@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Cadence · Assign and watch</title>
+<link rel="stylesheet" href="fonts.css"><link rel="stylesheet" href="weave.css"><link rel="stylesheet" href="weaver.css"><link rel="stylesheet" href="stage.css">
+</head><body class="stage">
+<div class="stage-shell">
+  <section class="stage-main">
+    <p class="stage-kicker">Live on this GB10</p>
+    <h1>Assign the work.</h1>
+    <div class="stage-mascot" data-weaver-avatar></div>
+    <p class="stage-action" id="action">Weaver is ready.</p>
+    <p class="stage-detail" id="detail">Give Cadence a task. The mascot follows each step the agent takes.</p>
+  </section>
+  <aside class="stage-side">
+    <a class="back" href="clinic.html">Receptionist console</a>
+    <h2>One task</h2>
+    <p class="lede">Cadence does the work. Weaver shows it.</p>
+    <form class="stage-form" id="assign">
+      <label class="sr-only" for="brief">Task</label>
+      <textarea id="brief" name="brief" rows="3" required maxlength="2000" placeholder="Restock anything below par"></textarea>
+      <p class="stage-error" id="error" role="alert"></p>
+      <button class="primary" type="submit">Assign task</button>
+    </form>
+    <div class="chips">
+      <button type="button" data-brief="Restock anything below par.">Restock</button>
+      <button type="button" data-brief="Fill the open shifts. Suggest who is eligible and propose the first person.">Fill shifts</button>
+      <button type="button" data-brief="Verify insurance for tomorrow's visits and flag anything inactive or a high deductible.">Insurance</button>
+      <button type="button" data-brief="What is waiting for approval, and what did you already finish?">Waiting</button>
+    </div>
+    <div class="tasks" id="tasks"></div>
+    <ul class="feed" id="feed"></ul>
+  </aside>
+</div>
+<script src="weaver-work.js"></script>
+<script src="stage.js"></script>
+</body></html>

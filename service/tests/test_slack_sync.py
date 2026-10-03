@@ -82,8 +82,11 @@ class VoiceClipFromSlack(unittest.TestCase):
                          [("lab", "CBC", "awaiting_signature"), ("rx", "Amoxi-synth 500 mg twice daily", "awaiting_signature")])
         thread = [p for p in fake.posts if p["thread_ts"] == "105.0"]
         self.assertIn("Transcribing", thread[0]["text"])
-        self.assertIn("Visit draft for P-104", thread[-1]["text"])
-        self.assertIn("CONFIRM", thread[-1]["text"])
+        self.assertEqual(thread[-1]["text"], "Notes ready for review.")
+        self.assertNotIn("Amoxi-synth", thread[-1]["text"])
+        self.assertNotIn("CONFIRM", thread[-1]["text"])
+        note = db.one(conn.execute("SELECT body FROM documents WHERE kind='visit_note'"))
+        self.assertIn("Amoxi-synth", note["body"])
         self.assertEqual(db.one(conn.execute("SELECT status FROM recordings"))["status"], "drafted")
 
     def test_same_clip_twice_is_processed_once(self):

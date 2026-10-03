@@ -310,8 +310,11 @@ def record_patient_reply(conn, patient_id: str, body: str) -> dict:
     if body.strip().upper() in ("STOP", "UNSUBSCRIBE"):
         set_consent(conn, patient_id, "sms", False, f"patient:{patient_id}")
         return {"message_id": mid, "sms_consent": "withdrawn"}
-    emit(conn, None, "patient.reply", patient_id, body[:200], {"message_id": mid, "patient_id": patient_id})
-    return {"message_id": mid}
+    from . import demo_story
+    bound = demo_story.bind_patient_reply(conn, patient_id, body)
+    emit(conn, None, "patient.reply", patient_id, body[:200],
+         {"message_id": mid, "patient_id": patient_id, "reschedule": bound})
+    return {"message_id": mid, "reschedule": bound}
 
 
 def patient_context(conn, patient_id: str) -> dict:
@@ -392,6 +395,8 @@ def verify_insurance(conn, patient_id: str, appointment_id: str | None = None) -
     if not p:
         raise ClinicError(f"unknown patient {patient_id}")
     result = adapters.payer_eligibility(conn, p)
+    from . import demo_story
+    result = demo_story.enrich_eligibility(conn, result, appointment_id, patient_id)
     cid = new_id("EL")
     conn.execute("INSERT INTO eligibility_checks VALUES (?,?,?,?,?,?)",
                  (cid, patient_id, appointment_id, result["status"], json.dumps(result), iso(now())))
@@ -406,7 +411,9 @@ def checkin_patient(conn, appt_id: str, task_id: str | None = None) -> dict:
     elig = verify_insurance(conn, a["patient_id"], appt_id)
     conn.execute("UPDATE appointments SET status='checked_in', version=version+1 WHERE id=?", (appt_id,))
     emit(conn, task_id, "patient.checked_in", "front_desk", f"{a['patient_id']} checked in for {appt_id}", {"eligibility": elig["status"]})
-    out = {"appointment_id": appt_id, "eligibility": elig}
+    out = {"appointment_id": appt_id, "eligibility": elig,
+           "consent_on_file": {"sms": has_consent(conn, a["patient_id"], "sms"),
+                               "documents": has_consent(conn, a["patient_id"], "documents")}}
     if elig["status"] == "active":
         out["copay_charge"] = create_charge(conn, appt_id, "COPAY", "Visit copay", elig["copay"], elig["copay"], task_id)
     else:
@@ -476,9 +483,17 @@ def route_order(conn, order_id: str, task_id: str | None = None) -> dict:
         raise ClinicError(f"{order_id} is not signed by a provider; request signature, do not transmit")
     if o["status"] != "received":
         return {"order_id": order_id, "status": o["status"]}
+    payload = {"order_id": order_id}
+    if o["kind"] == "rx":
+        from . import demo_story
+        cov = demo_story.apply_rx_coverage(conn, o, task_id)
+        if not cov["coverage"]["covered"]:
+            return cov
+        payload["coverage"] = cov["coverage"]
+        payload["pharmacy"] = cov["pharmacy"]
     action = "send_lab_order" if o["kind"] == "lab" else "transmit_rx"
-    dest = "lab" if o["kind"] == "lab" else "pharmacy"
-    ap = propose(conn, task_id, action, {"order_id": order_id}, f"Send {o['kind']} order {order_id} to {dest}: {o['detail'][:60]}",
+    dest = "lab" if o["kind"] == "lab" else payload.get("pharmacy", "pharmacy")
+    ap = propose(conn, task_id, action, payload, f"Send {o['kind']} order {order_id} to {dest}: {o['detail'][:60]}",
                  dedupe_key=f"route:{order_id}")
     conn.execute("UPDATE orders SET status='pending_approval' WHERE id=?", (order_id,))
     return {"order_id": order_id, "approval_id": ap["id"], "state": ap["state"]}
@@ -519,7 +534,32 @@ def provider_by_slack(conn, slack_user: str) -> dict:
     return p
 
 
-def draft_doctor_order(conn, doctor_slack_user: str, patient_id: str, kind: str, detail: str, task_id: str | None = None) -> dict:
+def _open_doctor_order_task(conn, provider_id: str, patient_id: str) -> dict | None:
+    """Active long-running task that tracks Slack drafts → CONFIRM → approval for one patient."""
+    key = f"doctor_order:{provider_id}:{patient_id}"
+    return one(conn.execute(
+        "SELECT * FROM tasks WHERE dedupe_key=? AND status IN ('running','waiting','review') ORDER BY created_at DESC",
+        (key,)))
+
+
+def ensure_doctor_order_task(conn, provider_id: str, patient_id: str, detail: str) -> dict:
+    """Create or reuse the open doctor_order task so Slack free-text becomes tracked clinic work."""
+    existing = _open_doctor_order_task(conn, provider_id, patient_id)
+    if existing:
+        return existing
+    key = f"doctor_order:{provider_id}:{patient_id}"
+    # Prior completed tasks keep the same dedupe_key; clear it so a new open task can be created.
+    conn.execute("UPDATE tasks SET dedupe_key=NULL WHERE dedupe_key=? AND status NOT IN ('running','waiting','review')", (key,))
+    return create_task(
+        conn, "doctor_order", f"Doctor orders for {patient_id}",
+        f"Provider {provider_id} ordered care for {patient_id} in Slack (latest: {detail[:160]}). "
+        f"Draft each rx/lab with draft_doctor_order (verbatim), ask them to CONFIRM in Slack, then after "
+        f"signature the service queues lab/pharmacy approvals. finish_task once every item for this patient "
+        f"is signed and queued (or cancelled) and you have posted a one-line status.",
+        dedupe_key=key)
+
+
+def draft_doctor_order(conn, doctor_slack_user: str, patient_id: str, kind: str, detail: str, task_id: str | None = None, notify: bool = True) -> dict:
     """Draft an order from a doctor's Slack message. It is NOT signed: the service asks the doctor to reply
     CONFIRM <id> in Slack and verifies that reply itself (see slack_sync.py)."""
     if kind not in ("lab", "rx"):
@@ -527,14 +567,21 @@ def draft_doctor_order(conn, doctor_slack_user: str, patient_id: str, kind: str,
     prov = provider_by_slack(conn, doctor_slack_user)
     if not one(conn.execute("SELECT id FROM patients WHERE id=?", (patient_id,))):
         raise ClinicError(f"unknown patient {patient_id}; use find_patient")
+    if not task_id:
+        task_id = ensure_doctor_order_task(conn, prov["id"], patient_id, detail)["id"]
     oid = new_id("O")
     ts = iso(now())
     conn.execute("INSERT INTO orders (id,kind,patient_id,provider_id,detail,status,created_at,source) VALUES (?,?,?,?,?,?,?,?)",
                  (oid, kind, patient_id, prov["id"], detail[:500], "awaiting_signature", ts, "slack"))
-    emit(conn, task_id, "order.drafted", "agent", f"Drafted {kind} order {oid} for {patient_id}: {detail[:80]}", {"order_id": oid})
-    adapters.slack_dm(conn, prov["id"], f"Drafted {kind} order *{oid}* for {patient_id}: {detail[:300]}\n"
-                                        f"Reply `CONFIRM {oid}` to sign it, or `CANCEL {oid}`.")
-    return one(conn.execute("SELECT * FROM orders WHERE id=?", (oid,)))
+    conn.execute("UPDATE tasks SET status='waiting', updated_at=? WHERE id=?", (ts, task_id))
+    emit(conn, task_id, "order.drafted", "agent", f"Drafted {kind} order {oid} for {patient_id}: {detail[:80]}",
+         {"order_id": oid, "kind": kind, "patient_id": patient_id})
+    if notify:
+        adapters.slack_dm(conn, prov["id"], f"Drafted {kind} order *{oid}* for {patient_id}: {detail[:300]}\n"
+                                            f"Reply `CONFIRM {oid}` to sign it, or `CANCEL {oid}`.")
+    row = one(conn.execute("SELECT * FROM orders WHERE id=?", (oid,)))
+    row["task_id"] = task_id
+    return row
 
 
 def sign_order(conn, order_id: str, provider_id: str, signature_ref: str) -> dict:
@@ -544,8 +591,14 @@ def sign_order(conn, order_id: str, provider_id: str, signature_ref: str) -> dic
         return o or {}
     conn.execute("UPDATE orders SET signed_by=?, signed_at=?, signature_ref=?, status='received' WHERE id=?",
                  (provider_id, iso(now()), signature_ref, order_id))
-    emit(conn, None, "order.signed", provider_id, f"{order_id} signed in Slack (message {signature_ref})")
-    route_order(conn, order_id)
+    task = _open_doctor_order_task(conn, provider_id, o["patient_id"])
+    if not task:
+        task = ensure_doctor_order_task(conn, provider_id, o["patient_id"], o["detail"])
+    task_id = task["id"]
+    emit(conn, task_id, "order.signed", provider_id,
+         f"{order_id} signed in Slack (message {signature_ref})",
+         {"order_id": order_id, "patient_id": o["patient_id"], "provider_id": provider_id})
+    route_order(conn, order_id, task_id)
     return one(conn.execute("SELECT * FROM orders WHERE id=?", (order_id,)))
 
 

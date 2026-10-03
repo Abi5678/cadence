@@ -42,7 +42,8 @@ form.inline input,form.inline select,form.inline textarea{border:1px solid var(-
 .phone-form{display:flex;gap:6px;padding:10px 12px 14px}.phone-form input{flex:1;border:1px solid var(--line);border-radius:20px;padding:9px 12px;min-width:0}
 #toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:10px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;z-index:9}
 #toast.show{opacity:1}
-@media (max-width:1100px){.workspace{padding-right:0}.phone{position:static;width:auto;height:520px;margin:0 16px 24px;border-radius:18px}}
+body.clinic-console #weaver-launcher,body.clinic-console #weaver-panel{right:368px}
+@media (max-width:1100px){.workspace{padding-right:0}.phone{position:static;width:auto;height:520px;margin:0 16px 24px;border-radius:18px}body.clinic-console #weaver-launcher,body.clinic-console #weaver-panel{right:22px}}
 @media (max-width:760px){.app-shell{grid-template-columns:1fr}.sidebar{position:static;height:auto}.ops-view{padding:20px 16px 40px}form.inline{grid-template-columns:1fr}}
 @media (prefers-reduced-motion:reduce){#toast{transition:none}}
 .card{overflow-x:auto}
