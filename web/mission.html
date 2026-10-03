@@ -52,6 +52,7 @@ section h2 em{font-style:normal;color:var(--text);text-transform:none;letter-spa
 .gpu div{background:#121a2e;border-radius:10px;padding:8px 10px}.gpu b{display:block;font-size:20px;font-variant-numeric:tabular-nums}.gpu span{font-size:11px;color:var(--muted)}
 .voice{font-size:13px;color:#cfd2e6}.voice b{color:#5ec8e5}
 .bars{display:flex;gap:6px;align-items:flex-end;height:46px;margin-top:6px}.bars i{flex:1;background:linear-gradient(var(--iris),var(--iris-deep));border-radius:3px 3px 0 0;min-height:2px;transition:height .6s}
+.keys{position:fixed;right:20px;bottom:20px;z-index:10;background:#18223bf2;border:1px solid var(--line);border-radius:12px;padding:12px 16px;font-size:13px;line-height:1.7;color:var(--text)}
 #replay{position:fixed;inset:6% 14%;background:#18223bf2;border:1px solid var(--champ);border-radius:18px;padding:22px 26px;display:none;flex-direction:column;z-index:9;backdrop-filter:blur(8px)}
 #replay.show{display:flex}#replay h2{font-family:var(--serif);font-weight:400;font-size:26px;margin:0 0 6px;color:var(--text);text-transform:none;letter-spacing:0}
 #replay pre{white-space:pre-wrap;font:15px/1.6 var(--sans);color:var(--text);background:#121a2e;border-radius:12px;padding:14px 16px}
@@ -101,6 +102,7 @@ section h2 em{font-style:normal;color:var(--text);text-transform:none;letter-spa
     <section style="min-height:0"><h2>Live agent activity</h2><ul class="river" id="river"></ul></section>
   </div>
 </main>
+<div id="keys" class="keys" hidden><b>Director keys</b> (invisible on video)<br>A · out-of-range reading (P-205) &nbsp; Shift+A · any patient<br>C · patient P-101 texts a cancellation<br>M · month-end CCM close<br>N · night shift (20&times; for 2 min, then replay)<br>R · replay last hour &nbsp; Esc · close replay &nbsp; ? · this help</div>
 <div id="replay" role="dialog" aria-label="Night shift replay"><button class="close" id="replay-close">Close</button><h2>While you were away</h2><div id="replay-meta" style="color:var(--muted)"></div><pre id="replay-summary">Summarizing on the GB10…</pre><ul id="replay-events"></ul></div>
 <script>
 (() => {
@@ -171,6 +173,20 @@ section h2 em{font-style:normal;color:var(--text);text-transform:none;letter-spa
     } catch {}
   }
   impact(); setInterval(impact, 5000);
+  // Director mode for recording the demo video: keyboard only, nothing drawn on screen.
+  const post = (url, body) => fetch(url, {method: 'POST', headers: {'content-type': 'application/json'}, body: JSON.stringify(body || {})});
+  document.addEventListener('keydown', e => {
+    if (e.target.closest('input,textarea,select') || e.metaKey || e.ctrlKey || e.altKey) return;
+    const k = e.key;
+    if (k === '?') { $('#keys').hidden = !$('#keys').hidden; return; }
+    if (k === 'Escape') { $('#replay').classList.remove('show'); $('#keys').hidden = true; return; }
+    if (k === 'a') post('/api/demo/anomaly', {patient_id: 'P-205'});
+    else if (k === 'A') post('/api/demo/anomaly', {});
+    else if (k === 'c') post('/api/sim/patient-reply', {patient_id: 'P-101', body: "Hi, I'm stuck at work and can't make my appointment today. Sorry!"});
+    else if (k === 'm') $('#close').click();
+    else if (k === 'n') $('#night').click();
+    else if (k === 'r') $('#replay-btn').click();
+  });
   function connect() { const es = new EventSource('/api/events'); es.onmessage = m => { try { river(JSON.parse(m.data)); } catch {} }; es.onerror = () => { es.close(); setTimeout(connect, 3000); }; }
   setInterval(() => $('#clock').textContent = new Date().toLocaleTimeString(), 1000);
   telemetry(); setInterval(telemetry, 3000); connect();

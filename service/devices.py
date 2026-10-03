@@ -21,6 +21,30 @@ STATE = {"speed": 1.0, "readings": 0, "anomalies": 0, "until": None}
 _rng = random.Random()
 
 
+def alert(conn, runner, d, val) -> dict:
+    """One out-of-range reading: record (escalates to the doctor), log agent triage, open a monitoring task."""
+    r = clinic.record_vitals(conn, d["patient_id"], d["metric"], val, d["unit"], source=d["id"])
+    STATE["anomalies"] += 1
+    ccm.log_agent_action(conn, d["patient_id"], f"Triaged out-of-range {d['metric']} {val}")
+    t = clinic.create_task(conn, "monitoring", f"Out-of-range {d['metric']} for {d['patient_id']}",
+                           f"Device {d['id']} reported {d['metric']}={val}{d['unit']} for {d['name']} ({d['patient_id']}). "
+                           "The doctor was alerted automatically. Check recent_vitals for a trend, post a one-line note for the "
+                           "care team, and if the patient has SMS consent draft a short message that the care team will call.",
+                           dedupe_key=f"anomaly:{d['patient_id']}:{now().strftime('%Y%m%d%H')}{now().minute // 30}")
+    runner.wake(t["id"])
+    return {"patient_id": d["patient_id"], "metric": d["metric"], "value": val, "reading": r}
+
+
+def inject(conn, runner, patient_id: str | None = None) -> dict:
+    """Director mode: an out-of-range reading on demand (for the demo video), from a device that can go abnormal."""
+    q = ("SELECT d.*, p.name FROM devices d JOIN patients p ON p.id=d.patient_id WHERE d.metric != 'weight_kg'"
+         + (" AND d.patient_id=?" if patient_id else "") + " ORDER BY d.patient_id LIMIT 1")
+    d = conn.execute(q, (patient_id,) if patient_id else ()).fetchone()
+    if not d:
+        raise ValueError("no monitored device for that patient")
+    return alert(conn, runner, d, ABNORMAL[d["metric"]](_rng))
+
+
 def tick(conn, runner) -> list[dict]:
     out = []
     with mcp_tools.LOCK:
@@ -35,15 +59,7 @@ def tick(conn, runner) -> list[dict]:
             abnormal, val = False, ccm.normal_value(d["metric"], _rng)
         with mcp_tools.LOCK:
             if abnormal:
-                r = clinic.record_vitals(conn, d["patient_id"], d["metric"], val, d["unit"], source=d["id"])
-                STATE["anomalies"] += 1
-                ccm.log_agent_action(conn, d["patient_id"], f"Triaged out-of-range {d['metric']} {val}")
-                t = clinic.create_task(conn, "monitoring", f"Out-of-range {d['metric']} for {d['patient_id']}",
-                                       f"Device {d['id']} reported {d['metric']}={val}{d['unit']} for {d['name']} ({d['patient_id']}). "
-                                       "The doctor was alerted automatically. Check recent_vitals for a trend, post a one-line note for the "
-                                       "care team, and if the patient has SMS consent draft a short message that the care team will call.",
-                                       dedupe_key=f"anomaly:{d['patient_id']}:{now().strftime('%Y%m%d%H')}{now().minute // 30}")
-                runner.wake(t["id"])
+                alert(conn, runner, d, val)
             else:
                 conn.execute("INSERT INTO vitals VALUES (?,?,?,?,?,?,?)",
                              (new_id("V"), d["patient_id"], d["metric"], val, d["unit"], iso(now()), d["id"]))

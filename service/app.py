@@ -351,6 +351,20 @@ async def replay(since: str):
     return {"since": since, "readings": readings, "events": evs[-200:], "summary": summary}
 
 
+class DemoAnomaly(BaseModel):
+    patient_id: str | None = None
+
+
+@api.post("/api/demo/anomaly")
+def demo_anomaly(body: DemoAnomaly):
+    """Director mode: trigger an out-of-range device reading on cue for the demo video."""
+    with mcp_tools.LOCK:
+        try:
+            return devices.inject(conn, runner, body.patient_id)
+        except ValueError as e:
+            raise HTTPException(404, str(e)) from e
+
+
 @api.post("/api/nightshift")
 def nightshift():
     with mcp_tools.LOCK:
