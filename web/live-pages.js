@@ -148,7 +148,8 @@
     const col = doc => st.schedule.filter(a => a.provider_id === doc).map(a => `<div class="slot ${a.status === 'cancelled' ? 'gone' : a.status === 'open' ? (a.offered_to ? 'held' : 'open') : 'booked'}">
         <time>${tm(a.starts_at)}</time><span>${a.status === 'open' ? (a.offered_to ? 'held for ' + esc(name(a.offered_to)) : 'open') : esc(a.patient || '')}</span>${a.status === 'cancelled' ? '<small>moved</small>' : ''}</div>`).join('');
     return `<h1>Dr. Chen is out. Watch Cadence handle it.</h1>
-      <p class="lede">After hours, nobody at the desk. One Slack message from the doctor starts it; patients answer by text. Everything else below is Cadence, running on this GB10, inside the clinic's rules.</p>
+      <p class="lede">After hours, nobody at the desk. One Slack message from the doctor starts it; patients answer by text. Everything else below is Cadence, running on this GB10, inside the clinic's rules.
+        <button type="button" class="mini" id="lv-dictate" title="Dictate the visit note for Bob (P-108); stays on this GB10">🎙 Dictate</button></p>
       <div class="story-kpis">
         <div><b id="story-clock">${new Date().toLocaleTimeString()}</b><span>clinic time</span></div>
         <div><b data-since="${esc(start ? start.created_at : '')}" id="story-elapsed">${start ? ago(Date.now() - Date.parse(start.created_at)) : '—'}</b><span>since the doctor's message</span></div>

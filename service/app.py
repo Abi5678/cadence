@@ -331,7 +331,8 @@ async def sim_voice(file: UploadFile = File(...), message: str = Form(""), notif
     if notify and out.get("patient_id"):  # local dictation: Slack gets one line, never the audio or transcript
         with mcp_tools.LOCK:
             from . import adapters
-            adapters.slack_dm(conn, "DR-CHEN", f"Notes ready for review for {out['patient_id']} (dictated locally on the GB10).")
+            adapters.slack_dm(conn, "DR-CHEN", f"Notes ready for review for {out['patient_id']} (dictated locally on the GB10). "
+                                            f"Reply `RELEASE {out.get('document')}` after you review them in Cadence.")
     return {**out, "replies": replies}
 
 

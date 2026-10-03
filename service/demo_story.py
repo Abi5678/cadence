@@ -504,7 +504,8 @@ def seed_story(conn, base=None) -> dict:
     tomorrow10 = base.replace(hour=14) + timedelta(days=1)  # 10:00 America/New_York in UTC (EDT)
     for pid, name, off, plan in STORY_PATIENTS:
         conn.execute("INSERT INTO patients (id,name,dob,phone,plan_id,member_id,preferred_pharmacy) VALUES (?,?,?,?,?,?,?)",
-                     (pid, name, "1970-05-0" + pid[-1], "+1-555-0" + pid[-3:], plan, "SYN-" + pid[-3:], "Synthetic Pharmacy, Main St"))
+                     (pid, name, "1970-05-0" + pid[-1], "+1-555-0" + pid[-3:], plan, "SYN-" + pid[-3:],
+                      "CVS Pharmacy, Worcester Road" if pid == "P-108" else "Synthetic Pharmacy, Main St"))
         for kind in ("sms", "documents"):
             conn.execute("INSERT OR IGNORE INTO consents VALUES (?,?,?,?,?)", (pid, kind, 1, iso(base - timedelta(days=60)), "kiosk"))
         conn.execute("INSERT INTO appointments (id,patient_id,provider_id,starts_at,reason,status,confirmation) VALUES (?,?,?,?,?,?,?)",
