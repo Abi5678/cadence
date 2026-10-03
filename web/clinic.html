@@ -25,7 +25,7 @@
 <div class="phone-top"><strong>Patient phone</strong><select id="phone-patient" aria-label="Patient"></select></div>
 <div id="phone-thread" class="phone-thread"></div>
 <div class="phone-quick"><button data-reply="YES">YES</button><button data-reply="NO">NO</button><button data-reply="RESCHEDULE">RESCHEDULE</button></div>
-<form id="phone-form" class="phone-form"><input id="phone-input" placeholder="Type a reply as the patient…" autocomplete="off" maxlength="500"><button class="primary">Send</button></form>
+<form id="phone-form" class="phone-form"><button type="button" id="phone-mic" class="phone-mic" aria-label="Speak as the patient" title="Speak (transcribed on the GB10)">🎙</button><input id="phone-input" placeholder="Type or speak a reply as the patient…" autocomplete="off" maxlength="500"><button class="primary">Send</button></form>
 </aside>
 <div id="toast" role="status" aria-live="polite"></div>
 <script src="clinic.js"></script></body></html>

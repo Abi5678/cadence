@@ -47,3 +47,7 @@ form.inline input,form.inline select,form.inline textarea{border:1px solid var(-
 @media (prefers-reduced-motion:reduce){#toast{transition:none}}
 .card{overflow-x:auto}
 .nowrap{white-space:nowrap;overflow-wrap:normal}
+.phone-mic{border-radius:50%;min-width:38px;padding:6px 8px}
+.phone-mic.recording{background:#d9534f;border-color:#d9534f;color:#fff;animation:mic-pulse 1.2s infinite}
+@keyframes mic-pulse{0%{box-shadow:0 0 0 0 #d9534f80}70%{box-shadow:0 0 0 10px #d9534f00}100%{box-shadow:0 0 0 0 #d9534f00}}
+@media (prefers-reduced-motion:reduce){.phone-mic.recording{animation:none}}

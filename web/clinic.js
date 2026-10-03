@@ -202,6 +202,29 @@
     act(() => call('/api/consents', { patient_id: c.dataset.consent, kind: c.dataset.kind, granted: c.checked }), 'Consent updated');
   });
   $('#phone-patient').addEventListener('change', e => { phonePatient = e.target.value; renderPhone(); });
+  // Patient voice: record in the browser, transcribe on the GB10 (NVIDIA Parakeet), send as the patient's reply.
+  let rec = null, chunks = [];
+  $('#phone-mic').addEventListener('click', async () => {
+    const mic = $('#phone-mic');
+    if (rec && rec.state === 'recording') { rec.stop(); return; }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      rec = new MediaRecorder(stream); chunks = [];
+      rec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+      rec.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop()); mic.classList.remove('recording'); mic.textContent = '…';
+        try {
+          const fd = new FormData(); fd.append('file', new Blob(chunks, { type: rec.mimeType || 'audio/webm' }), 'patient.webm');
+          const r = await fetch('/api/voice/command', { method: 'POST', body: fd });
+          if (!r.ok) throw new Error('speech service unavailable');
+          const d = await r.json();
+          if (!d.text) { toast('Didn’t catch that, try again'); return; }
+          sendReply(d.text); toast(`Heard: “${d.text.slice(0, 60)}” (${d.timings.asr_s}s on GB10)`);
+        } catch (e) { toast(e.message); } finally { mic.textContent = '🎙'; }
+      };
+      rec.start(); mic.classList.add('recording'); mic.textContent = '■';
+    } catch (e) { toast('Microphone unavailable: ' + e.message); }
+  });
   function sendReply(body) { act(() => call('/api/sim/patient-reply', { patient_id: phonePatient, body }), 'Reply sent, Cadence is on it'); }
   window.addEventListener('hashchange', () => { tab = location.hash.slice(1) || 'approvals'; render(); });
 

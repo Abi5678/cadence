@@ -53,6 +53,8 @@ async def _start() -> None:
     asyncio.create_task(scheduler.loop(conn, runner))
     asyncio.create_task(scheduler.slack_loop(conn))
     asyncio.create_task(devices.loop(conn, runner))
+    from . import watchdog
+    asyncio.create_task(watchdog.loop(conn))
 
 
 def locked(fn, *a, **kw):
@@ -334,7 +336,8 @@ async def telemetry_now():
             " AND ev.created_at >= ?) AS alerts "
             "FROM ccm_enrollments e JOIN patients p ON p.id=e.patient_id ORDER BY e.patient_id",
             (db.iso(db.now() - __import__('datetime').timedelta(minutes=30)),)))
-    return {"gpu": g, "vllm": v, "activity": a, "tiles": tiles, "devices": {k: str(v) for k, v in devices.STATE.items()},
+    from . import watchdog
+    return {"watchdog": watchdog.STATE, "gpu": g, "vllm": v, "activity": a, "tiles": tiles, "devices": {k: str(v) for k, v in devices.STATE.items()},
             "agent_backend": agent.backend(), "model": agent.VLLM_MODEL, "now": db.iso(db.now())}
 
 
