@@ -4,4 +4,4 @@ set -euo pipefail
 systemctl --user stop cadence
 rm -f "${CADENCE_DB:-$HOME/.local/share/cadence/cadence.db}"{,-wal,-shm}
 systemctl --user start cadence
-echo "Fresh demo data loaded: http://localhost:8080/web/clinic.html"
+echo "Fresh demo data loaded: http://localhost:8090/web/clinic.html"

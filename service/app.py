@@ -1,4 +1,4 @@
-"""Cadence service: REST + SSE + static UI on 127.0.0.1:8080, MCP for Hermes on the docker0 bridge.
+"""Cadence service: REST + SSE + static UI on 127.0.0.1:8090 (8080 belongs to the OpenShell gateway), MCP for Hermes on the docker0 bridge.
 
 Run:  python -m service.app            (from the cadence/ folder)
 Env:  CADENCE_MCP_TOKEN (required for MCP), CADENCE_MCP_HOST (default 172.17.0.1),
@@ -232,7 +232,7 @@ def mcp_app(host: str, port: int):
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
-    servers = [uvicorn.Server(uvicorn.Config(api, host="127.0.0.1", port=int(os.environ.get("CADENCE_PORT", 8080)), log_level="warning"))]
+    servers = [uvicorn.Server(uvicorn.Config(api, host="127.0.0.1", port=int(os.environ.get("CADENCE_PORT", 8090)), log_level="warning"))]
     token = os.environ.get("CADENCE_MCP_TOKEN")
     if token:
         tls = Path(os.environ.get("CADENCE_TLS_DIR", Path.home() / "cadence-tls"))
